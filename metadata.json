@@ -1,0 +1,7 @@
+{
+  "name": "Akamper POS",
+  "description": "A high-performance restaurant management system and point-of-sale dashboard featuring real-time inventory tracking, AI-assisted order processing, and comprehensive analytics.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
