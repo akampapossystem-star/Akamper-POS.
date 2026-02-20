@@ -1,4 +1,5 @@
 
+
 export enum AppView {
   DASHBOARD = 'DASHBOARD',
   SELL = 'SELL',
@@ -35,7 +36,10 @@ export enum AppView {
   SYSTEM_BRANDING = 'SYSTEM_BRANDING',
   VOID_LOG = 'VOID_LOG',
   KITCHEN_INVENTORY = 'KITCHEN_INVENTORY',
-  BAKERY_INVENTORY = 'BAKERY_INVENTORY'
+  BAKERY_INVENTORY = 'BAKERY_INVENTORY',
+  AI_STUDIO = 'AI_STUDIO',
+  // Added WAITER_ALLOCATIONS to fix "Property does not exist on type typeof AppView" error in src/App.tsx
+  WAITER_ALLOCATIONS = 'WAITER_ALLOCATIONS'
 }
 
 export type UserRole = 'WAITER' | 'CASHIER' | 'MANAGER' | 'OWNER' | 'CHEF' | 'CLIENT' | 'STORE_KEEPER' | 'BARMAN' | 'BARISTA' | 'HEAD_BAKER' | null;
@@ -227,10 +231,11 @@ export interface ReturnRecord {
   confirmedBy?: string; // Name of manager who checked the box
 }
 
+// Added missing Expense interface
 export interface Expense {
   id: string;
-  itemName: string; // What was bought
-  department: string; // Where it is going
+  itemName: string;
+  department: string;
   category: string;
   description: string;
   amount: number;
@@ -320,6 +325,15 @@ export interface Table {
   y: number; // Percentage 0-100
   color?: string; // New: Custom table color
   scale?: number; // New: Size scale (0.5 - 2.0)
+}
+
+// Added SectionAllocation interface to fix "Module './types' has no exported member SectionAllocation" error in src/App.tsx
+export interface SectionAllocation {
+  id: string;
+  sectionName: string;
+  waiterId: string;
+  waiterName: string;
+  timestamp: Date;
 }
 
 export interface StockMovementLog {

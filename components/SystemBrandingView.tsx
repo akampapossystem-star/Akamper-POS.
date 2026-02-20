@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { 
   Palette, Upload, Phone, Mail, Save, Monitor, 
@@ -93,7 +92,7 @@ const SystemBrandingView: React.FC<SystemBrandingViewProps> = ({ systemConfig, o
                                 <span className="text-[10px] font-black uppercase tracking-widest">Update</span>
                                 <input 
                                     type="file" 
-                                    accept="image/*" 
+                                    accept="image/*,.heic,.heif,.avif,.webp,.svg" 
                                     onChange={handleLogoUpload} 
                                     className="hidden" 
                                 />
@@ -108,7 +107,7 @@ const SystemBrandingView: React.FC<SystemBrandingViewProps> = ({ systemConfig, o
                                 <Upload className="w-4 h-4" /> Upload New Image
                                 <input 
                                     type="file" 
-                                    accept="image/*" 
+                                    accept="image/*,.heic,.heif,.avif,.webp,.svg" 
                                     onChange={handleLogoUpload} 
                                     className="hidden" 
                                 />

@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { ArrowLeft, Clock, MapPin, Phone, Star, UtensilsCrossed, ExternalLink, ShoppingBag } from 'lucide-react';
 import { BusinessPage, Product } from '../types';
@@ -160,8 +161,8 @@ const BusinessLandingView: React.FC<BusinessLandingViewProps> = ({ page, onBack 
             <div className="md:text-right">
                <p className="text-xs font-black text-gray-500 uppercase tracking-widest mb-1">Powered By</p>
                <div className="inline-flex items-center gap-2 bg-gray-800 px-4 py-2 rounded-xl">
-                  <div className="w-6 h-6 bg-blue-600 rounded-md flex items-center justify-center text-[10px] font-black italic">A</div>
-                  <span className="font-bold uppercase tracking-widest text-sm">Akamper POS</span>
+                  <div className="w-6 h-6 bg-blue-600 rounded-md flex items-center justify-center text-[10px] font-black italic">E</div>
+                  <span className="font-bold uppercase tracking-widest text-sm">EAGLE 🦅 EYED POS</span>
                </div>
             </div>
          </div>

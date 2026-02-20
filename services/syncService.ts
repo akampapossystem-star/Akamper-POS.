@@ -12,35 +12,41 @@ export type SyncActionType =
   | 'TYPING_EVENT'
   | 'MESSAGE_READ'
   | 'KITCHEN_CALL'
-  | 'PRESENCE_HEARTBEAT'; // New action for Online Status
+  | 'PRESENCE_HEARTBEAT';
 
 export interface SyncMessage {
   type: SyncActionType;
   payload: any;
   timestamp: number;
   senderId: string;
+  tenantId: string; // New: Explicit tenant scoping
 }
 
-const CHANNEL_NAME = 'akampa_pos_realtime_v1';
 const INSTANCE_ID = Math.random().toString(36).substr(2, 9);
-const WS_URL = 'wss://api.akampapos.cloud/realtime'; // Production Endpoint
+const WS_URL = 'wss://api.akampapos.cloud/realtime';
 
 class RealtimeService {
-  private bc: BroadcastChannel;
+  private bc: BroadcastChannel | null = null;
   private ws: WebSocket | null = null;
   private listeners: Set<(msg: SyncMessage) => void> = new Set();
   private reconnectInterval: number = 3000;
   private isConnected: boolean = false;
+  private currentTenantId: string = 'GLOBAL';
 
   constructor() {
-    // 1. Initialize Local Broadcast (Tab-to-Tab)
-    this.bc = new BroadcastChannel(CHANNEL_NAME);
-    this.bc.onmessage = (event) => this.handleMessage(event.data);
-
-    // 2. Initialize WebSocket (Device-to-Device)
     this.connectWebSocket();
+  }
 
-    console.log(`[Realtime] Initialized Client ID: ${INSTANCE_ID}`);
+  /**
+   * Initializes the channel for a specific tenant.
+   * This is called when a user logs in or a master owner switches views.
+   */
+  public initTenantChannel(tenantId: string) {
+    if (this.bc) this.bc.close();
+    this.currentTenantId = tenantId;
+    this.bc = new BroadcastChannel(`akampa_pos_${tenantId}`);
+    this.bc.onmessage = (event) => this.handleMessage(event.data);
+    console.log(`[Realtime] Channel Isolated for Tenant: ${tenantId}`);
   }
 
   private connectWebSocket() {
@@ -50,37 +56,32 @@ class RealtimeService {
       this.ws = new WebSocket(WS_URL);
       
       this.ws.onopen = () => {
-        console.log('[WS] Connected to Cloud Relay');
         this.isConnected = true;
-        // Optional: Send handshake or auth if needed
       };
 
       this.ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
-          this.handleMessage(msg);
+          // Strict filtering at the client side if the server is a broadcast relay
+          if (msg.tenantId === this.currentTenantId) {
+              this.handleMessage(msg);
+          }
         } catch (e) {
           console.error('[WS] Failed to parse message', e);
         }
       };
 
       this.ws.onclose = () => {
-        if (this.isConnected) {
-            console.warn('[WS] Disconnected. Retrying...');
-        }
         this.isConnected = false;
         this.ws = null;
         setTimeout(() => this.connectWebSocket(), this.reconnectInterval);
       };
 
-      this.ws.onerror = (err) => {
-        // Silent error log to avoid console spam in dev without server
-        // console.debug('[WS] Error:', err); 
+      this.ws.onerror = () => {
         this.ws?.close();
       };
 
     } catch (e) {
-      console.warn('[WS] Offline Mode - Using Local Broadcast');
       setTimeout(() => this.connectWebSocket(), this.reconnectInterval);
     }
   }
@@ -95,37 +96,33 @@ class RealtimeService {
       type,
       payload,
       timestamp: Date.now(),
-      senderId: INSTANCE_ID
+      senderId: INSTANCE_ID,
+      tenantId: this.currentTenantId
     };
 
-    // 1. Send to Local Tabs via BroadcastChannel
-    this.bc.postMessage(msg);
+    if (this.bc) this.bc.postMessage(msg);
 
-    // 2. Send to Cloud via WebSocket (if connected)
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg));
     }
   }
 
   private handleMessage(msg: SyncMessage) {
-    // Prevent echo loops (ignore messages sent by self)
     if (msg.senderId === INSTANCE_ID) return;
-    
-    // Notify subscribers
+    if (msg.tenantId !== this.currentTenantId) return; // Final fallback filter
     this.listeners.forEach(listener => listener(msg));
   }
 
   public close() {
-    this.bc.close();
+    if (this.bc) this.bc.close();
     if (this.ws) this.ws.close();
   }
 }
 
-// Singleton Instance
 const service = new RealtimeService();
 
-// Export Adapter Functions to match existing API
-export const initSync = (onMessage: (msg: SyncMessage) => void) => {
+export const initSync = (onMessage: (msg: SyncMessage) => void, tenantId: string) => {
+  service.initTenantChannel(tenantId);
   return service.subscribe(onMessage);
 };
 

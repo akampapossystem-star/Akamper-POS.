@@ -1,4 +1,5 @@
 
+
 export enum AppView {
   DASHBOARD = 'DASHBOARD',
   SELL = 'SELL',
@@ -34,7 +35,9 @@ export enum AppView {
   SYSTEM_BRANDING = 'SYSTEM_BRANDING',
   VOID_LOG = 'VOID_LOG',
   KITCHEN_INVENTORY = 'KITCHEN_INVENTORY',
-  BAKERY_INVENTORY = 'BAKERY_INVENTORY'
+  BAKERY_INVENTORY = 'BAKERY_INVENTORY',
+  AI_STUDIO = 'AI_STUDIO',
+  WAITER_ALLOCATIONS = 'WAITER_ALLOCATIONS'
 }
 
 export type UserRole = 'WAITER' | 'CASHIER' | 'MANAGER' | 'OWNER' | 'CHEF' | 'CLIENT' | 'STORE_KEEPER' | 'BARMAN' | 'BARISTA' | 'HEAD_BAKER' | null;
@@ -69,6 +72,7 @@ export interface SystemConfig {
   currency: string;
   master_pin: string;
   fontFamily?: string; 
+  dataRetentionYears: number; // New: Policy for data keep
   colors: {
     primary: string;
     accent: string;
@@ -87,6 +91,15 @@ export interface SystemConfig {
     fontFamily: string; 
     paperWidth: '58mm' | '80mm';
   };
+}
+
+export interface SystemAuditLog {
+  id: string;
+  timestamp: Date;
+  action: 'LOGO_CHANGE' | 'STAFF_EDIT' | 'PERMISSION_CHANGE' | 'SYSTEM_REBOOT' | 'DATA_EXPORT';
+  performedBy: string;
+  details: string;
+  metadata?: any;
 }
 
 export interface RegisterState {
@@ -146,10 +159,12 @@ export interface SpiritLog {
   staffName: string;
 }
 
+export type SpiritCategory = 'WHISKEY' | 'VODKA' | 'GIN' | 'RUM' | 'TEQUILA' | 'BRANDY' | 'LIQUEUR' | 'WINE' | 'CHAMPAGNE' | 'COGNAC' | 'SINGLE MALT' | 'IRISH WHISKEY' | 'BLENDED WHISKY';
+
 export interface SpiritBottle {
   id: string;
   name: string;
-  type: 'WHISKEY' | 'VODKA' | 'GIN' | 'RUM' | 'TEQUILA' | 'BRANDY' | 'LIQUEUR';
+  type: SpiritCategory;
   totalVolume: number;
   currentVolume: number;
   measureStandard: 'NEW_25ML' | 'OLD_30ML';
@@ -219,6 +234,7 @@ export interface ReturnRecord {
   confirmedBy?: string;
 }
 
+// Added missing Expense interface
 export interface Expense {
   id: string;
   itemName: string;
@@ -246,8 +262,12 @@ export interface BusinessPage {
     password?: string;
     adminPin?: string;
   };
-  // Explicit isolated settings for this tenant
-  settings?: SystemConfig;
+  settings?: {
+    currency?: string;
+    logo?: string;
+    primaryColor?: string;
+    receiptHeader?: string;
+  };
 }
 
 export interface Customer {
@@ -304,6 +324,14 @@ export interface Table {
   y: number;
   color?: string;
   scale?: number;
+}
+
+export interface SectionAllocation {
+  id: string;
+  sectionName: string;
+  waiterId: string;
+  waiterName: string;
+  timestamp: Date;
 }
 
 export interface StockMovementLog {

@@ -1,18 +1,9 @@
-
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
-  Menu, PanelLeftClose, MapPin, CloudOff, Keyboard, ChevronsLeft, XSquare, UserPlus, 
-  Briefcase, Calculator, Archive, Camera, Users, ArrowLeft, Minimize, Maximize,
-  Utensils, ChefHat, ClipboardList, Banknote, Phone, Contact, Trash2
+  Menu, Users, Calendar, Banknote, Calculator, Keyboard, Maximize, Minimize,
+  MapPin, Utensils, ChefHat, ClipboardList, X, Clock, LayoutGrid
 } from 'lucide-react';
 import { UserRole, StaffMember, AppView } from '../types';
-
-interface OnlineUser {
-    id: string;
-    name: string;
-    role: UserRole;
-    lastSeen: number;
-}
 
 interface HeaderProps {
   title: string;
@@ -20,63 +11,28 @@ interface HeaderProps {
   isSidebarOpen?: boolean;
   primaryColor: string;
   userRole: UserRole;
-  centerActions?: React.ReactNode;
-  isSellView?: boolean;
   businessName?: string;
-  networkStatus?: 'online' | 'offline' | 'syncing';
   currentUser?: StaffMember | null;
-  onUpdateUserPhoto?: (file: File) => void;
-  
-  // Navigation
-  onGlobalBack?: () => void;
-  canGoBack?: boolean;
-  onNavigate?: (view: AppView) => void; // New Navigation Handler
-
-  // Toolbar Handlers
-  onBack?: () => void; // Kept for interface compatibility but removed from UI
-  onRecentTransactions?: () => void;
-  onCloseRegister?: () => void;
-  onEndOfDay?: () => void;
-  onStaffSwitch?: () => void;
-  onRegisterDetails?: () => void;
-  onCalculator?: () => void;
-  onSellReturn?: () => void;
-  onViewSuspended?: () => void;
-  onAddExpense?: () => void;
-  onToggleKeyboard?: () => void;
-  
-  onlineStaffList?: OnlineUser[]; 
+  onNavigate: (view: AppView) => void; 
+  onCalculator: () => void;
+  onToggleKeyboard: () => void;
+  onLogout: () => void; 
 }
 
 const Header: React.FC<HeaderProps> = ({ 
-  title, onMenuClick, isSidebarOpen, primaryColor, userRole, 
-  centerActions, isSellView, businessName,
-  currentUser, onUpdateUserPhoto,
-  onGlobalBack, canGoBack, onNavigate,
-  onBack, onRecentTransactions, onCloseRegister, onEndOfDay, onStaffSwitch,
-  onRegisterDetails, onCalculator, onSellReturn, onViewSuspended, onAddExpense,
-  onToggleKeyboard, onlineStaffList = []
+  title, onMenuClick, isSidebarOpen, businessName,
+  onNavigate, onCalculator, onToggleKeyboard
 }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [isOnline, setIsOnline] = useState(navigator.onLine); 
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     const handleFullscreenChange = () => setIsFullscreen(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
-    
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
     return () => {
       clearInterval(timer);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
     };
   }, []);
 
@@ -88,249 +44,111 @@ const Header: React.FC<HeaderProps> = ({
     }
   };
 
-  const handlePhotoClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && onUpdateUserPhoto) {
-      onUpdateUserPhoto(file);
-    }
-  };
-
-  const TooltipButton = ({ onClick, icon: Icon, label, colorClass = "text-gray-600 hover:text-blue-600", bgClass = "bg-white hover:bg-gray-50", badgeCount = 0 }: any) => (
+  const TopIconButton = ({ onClick, icon: Icon }: { onClick?: () => void, icon: any }) => (
     <button 
       onClick={onClick}
-      className={`group relative p-2 md:px-3 md:py-2 rounded-lg border border-gray-200 shadow-sm transition-all active:scale-95 flex items-center justify-center gap-2 ${bgClass} ${colorClass}`}
-      title={label}
+      className="w-9 h-9 md:w-10 md:h-10 flex items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 transition-all active:scale-90"
     >
-      <Icon className="w-5 h-5" />
-      <span className="hidden xl:inline text-xs font-bold uppercase tracking-tight">{label}</span>
-      
-      {badgeCount > 0 && (
-          <span className="absolute -top-2 -right-2 bg-green-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full border-2 border-white">
-              {badgeCount}
-          </span>
-      )}
-
-      {/* Tooltip for smaller screens */}
-      <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-[10px] font-bold rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none xl:hidden">
-        {label}
-      </div>
+      <Icon className="w-4 h-4 md:w-5 md:h-5 text-white" />
     </button>
   );
 
-  // Permission Logic
-  const canAccessRestrictedTabs = ['CASHIER', 'MANAGER', 'OWNER'].includes(userRole || '');
-  const canViewMenuAndOrders = ['WAITER', 'CASHIER', 'MANAGER', 'OWNER'].includes(userRole || '');
-  const canViewKitchen = ['CHEF', 'MANAGER', 'OWNER', 'WAITER', 'CASHIER'].includes(userRole || '');
+  const BottomTabButton = ({ onClick, icon: Icon, colorClass }: { onClick: () => void, icon: any, colorClass: string }) => (
+    <button 
+      onClick={onClick}
+      className="w-10 h-10 md:w-12 md:h-12 flex items-center justify-center rounded-xl border border-gray-100 bg-white hover:bg-gray-50 hover:shadow-md transition-all active:scale-95"
+    >
+      <Icon className={`w-5 h-5 md:w-6 md:h-6 ${colorClass}`} />
+    </button>
+  );
 
   return (
-    <header className="flex flex-col z-30 shadow-lg sticky top-0">
-      {/* Main Bar */}
-      <div className={`h-16 flex items-center justify-between px-4 md:px-6 transition-colors duration-500 ${isOnline ? 'bg-gradient-to-r from-blue-600 via-pink-500 to-emerald-500' : 'bg-gray-800'}`}>
-        <div className="flex items-center gap-2 md:gap-4 shrink-0 h-full text-white">
-          
-          {/* Global Back Button */}
-          {canGoBack && onGlobalBack && (
-             <button 
-                onClick={onGlobalBack}
-                className="h-10 w-10 rounded-lg flex items-center justify-center transition-colors hover:bg-white/20 mr-1"
-                title="Go Back"
-             >
-                <ArrowLeft className="w-6 h-6" />
-             </button>
-          )}
-
-          <button 
-            onClick={onMenuClick}
-            className="h-full w-10 md:p-2 rounded-lg flex items-center justify-center transition-colors hover:bg-white/20"
-          >
-            {isSidebarOpen ? <PanelLeftClose className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+    <header className="flex flex-col z-[60] shrink-0 font-sans shadow-sm">
+      {/* TIER 1: THE GRADIENT BAR */}
+      <div className="h-14 md:h-16 bg-gradient-to-r from-[#4d51be] via-[#d53f8c] via-[#38b2ac] to-[#319795] flex items-center justify-between px-4 md:px-6">
+        
+        {/* Left: Sidebar Toggle & App Title */}
+        <div className="flex items-center gap-3 md:gap-5">
+          <button onClick={onMenuClick} className="text-white hover:opacity-80 transition-opacity">
+            <Menu className="w-6 h-6 md:w-7 md:h-7" strokeWidth={2.5} />
           </button>
-          
-          <h1 className="text-lg md:text-xl font-black truncate uppercase tracking-tighter drop-shadow-sm">
+          <h1 className="text-lg md:text-xl font-black text-white uppercase tracking-tight drop-shadow-sm">
             {title}
           </h1>
         </div>
 
-        {/* System Info Right */}
-        <div className="flex items-center gap-4 text-white">
-           
-           {/* Democrat / CRM Button - Moved to Header */}
-           {onNavigate && canAccessRestrictedTabs && (
-                <button
-                    onClick={() => onNavigate(AppView.CRM)}
-                    className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-all text-white flex items-center justify-center"
-                    title="Democrat (CRM)"
-                >
-                    <Users className="w-5 h-5" />
-                </button>
-           )}
-
-           {/* Phone Book Button - Moved to Header */}
-           {onNavigate && (
-                <button
-                    onClick={() => onNavigate(AppView.PHONEBOOK)}
-                    className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-all text-white flex items-center justify-center"
-                    title="Phone Book"
-                >
-                    <Contact className="w-5 h-5" />
-                </button>
-           )}
-
-           {/* Add Expense Button (Moved to Header) */}
-           {onAddExpense && canAccessRestrictedTabs && (
-                <button
-                    onClick={onAddExpense}
-                    className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-all text-white flex items-center justify-center"
-                    title="Log Expense"
-                >
-                    <Banknote className="w-5 h-5" />
-                </button>
-           )}
-
-           {/* Calculator Button (Moved to Header) */}
-           {onCalculator && (
-                <button
-                    onClick={onCalculator}
-                    className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-all text-white flex items-center justify-center"
-                    title="Calculator"
-                >
-                    <Calculator className="w-5 h-5" />
-                </button>
-           )}
-
-           {/* Keyboard Button */}
-           {onToggleKeyboard && (
-                <button
-                    onClick={onToggleKeyboard}
-                    className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-all text-white flex items-center justify-center"
-                    title="Virtual Keypad"
-                >
-                    <Keyboard className="w-5 h-5" />
-                </button>
-           )}
-
-           {/* Full Screen Toggle */}
-           <button
-              onClick={toggleFullscreen}
-              className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-all text-white flex items-center justify-center"
-              title={isFullscreen ? "Exit Full Screen" : "Full Screen"}
-           >
-              {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
-           </button>
-
-           {/* Network Status */}
-           <div className="hidden sm:flex">
-            {isOnline ? (
-               <div className="flex items-center gap-2 px-3 py-1 bg-emerald-500/20 backdrop-blur-md border border-emerald-400/30 rounded-full text-emerald-100 text-[10px] font-black uppercase tracking-widest animate-in fade-in">
-                <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse shadow-[0_0_8px_#34d399]"></div>
-                <span>Online</span>
-              </div>
-            ) : (
-               <div className="flex items-center gap-2 px-3 py-1 bg-red-500/20 backdrop-blur-md border border-red-400/30 rounded-full text-red-100 text-[10px] font-black uppercase tracking-widest animate-pulse">
-                <CloudOff className="w-3 h-3" />
-                <span>Offline</span>
-              </div>
-            )}
+        {/* Right: Functional Icons & Status */}
+        <div className="flex items-center gap-2 md:gap-3">
+          <div className="hidden sm:flex items-center gap-2 md:gap-2 mr-2 md:mr-4">
+             <TopIconButton icon={Users} onClick={() => onNavigate(AppView.HRM)} />
+             <TopIconButton icon={Calendar} onClick={() => onNavigate(AppView.DAY_SHIFTS)} />
+             <TopIconButton icon={Banknote} onClick={() => onNavigate(AppView.EXPENSES)} />
+             <TopIconButton icon={Calculator} onClick={onCalculator} />
+             <TopIconButton icon={Keyboard} onClick={onToggleKeyboard} />
+             <TopIconButton icon={isFullscreen ? Minimize : Maximize} onClick={toggleFullscreen} />
           </div>
 
-          <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/20 backdrop-blur-md border border-white/10">
-            <MapPin className="w-4 h-4" />
-            <span className="text-xs font-bold uppercase tracking-tight">{businessName || 'Location'}</span>
+          {/* Status Pill */}
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-black/20 backdrop-blur-md rounded-full border border-white/10">
+             <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
+             <span className="text-[9px] font-black text-white uppercase tracking-widest leading-none">Online</span>
           </div>
 
-          {/* User Profile Section */}
-          {currentUser && (
-            <div className="flex items-center gap-3 pl-4 border-l border-white/20">
-              <div className="flex flex-col items-end mr-1">
-                <span className="text-sm font-black leading-none">{currentUser.name}</span>
-                <span className="text-[10px] font-bold text-white/80 uppercase tracking-wider bg-white/10 px-1.5 rounded mt-0.5">
-                  {currentUser.role?.replace('_', ' ')}
-                </span>
-              </div>
-              
-              <div 
-                className="relative group cursor-pointer"
-                onClick={handlePhotoClick}
-                title="Click to update photo"
-              >
-                <div className="w-10 h-10 rounded-full bg-white/20 border-2 border-white/30 overflow-hidden flex items-center justify-center shadow-md">
-                  {currentUser.photoUrl ? (
-                    <img src={currentUser.photoUrl} alt="Profile" className="w-full h-full object-cover" />
-                  ) : (
-                    <span className="text-sm font-bold">{currentUser.name.charAt(0)}</span>
-                  )}
-                </div>
-                
-                {/* Hover overlay for upload */}
-                <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Camera className="w-4 h-4 text-white" />
-                </div>
-                
-                <input 
-                  type="file" 
-                  ref={fileInputRef}
-                  className="hidden" 
-                  accept="image/*"
-                  onChange={handleFileChange}
-                />
-              </div>
-            </div>
-          )}
+          {/* Location / Business Box */}
+          <button 
+            onClick={() => onNavigate(AppView.SETTINGS)}
+            className="flex items-center gap-2 px-3 py-1.5 md:py-2 bg-white/20 hover:bg-white/30 backdrop-blur-md rounded-xl border border-white/10 ml-2 md:ml-3 text-left group transition-all"
+          >
+             <MapPin className="w-3.5 h-3.5 text-white/80 group-hover:scale-110 transition-transform" />
+             <div className="leading-tight pr-1">
+                <p className="text-[7px] md:text-[8px] font-black text-white uppercase tracking-widest opacity-80">Location</p>
+                <p className="text-[10px] md:text-xs font-black text-white uppercase tracking-tighter truncate max-w-[60px] md:max-w-[100px]">{businessName || 'Kampala Cafe'}</p>
+             </div>
+          </button>
         </div>
       </div>
 
-      {/* Toolbar - Only visible if handlers are provided (Implies POS/Interactive View) */}
-      {(onNavigate) && (
-        <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center gap-2 overflow-x-auto no-scrollbar relative">
-          
-          {/* Date Widget */}
-          <div className="hidden md:flex flex-col justify-center px-4 py-1 bg-[#5848c4] text-white rounded-lg shadow-md mr-2 shrink-0">
-             <div className="text-xs font-black opacity-80">{currentTime.toLocaleDateString()}</div>
-             <div className="text-sm font-black flex items-center gap-2">
-                {currentTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                <Keyboard className="w-3 h-3 opacity-50" />
-             </div>
-          </div>
+      {/* TIER 2: SECONDARY OPERATIONAL BAR */}
+      <div className="h-12 md:h-14 bg-white border-b border-gray-100 flex items-center px-4 md:px-6 justify-between shrink-0">
+        <div className="flex items-center gap-3">
+            {/* Real-time Clock Badge - COMPACT VERSION */}
+            <div className="flex items-center gap-2 md:gap-3 px-3 py-1.5 md:py-2 bg-[#5c56d6] text-white rounded-xl shadow-md transition-transform hover:scale-[1.01]">
+                <div className="leading-none flex flex-col justify-center">
+                    <p className="text-[8px] md:text-[9px] font-bold text-white/60 tracking-tight mb-0.5">{currentTime.toLocaleDateString()}</p>
+                    <p className="text-sm md:text-base font-black tabular-nums tracking-tighter">
+                        {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
+                    </p>
+                </div>
+                <div className="w-px h-5 md:h-6 bg-white/20"></div>
+                <Keyboard className="w-3.5 h-3.5 text-white/60" />
+            </div>
 
-          {/* Action Tabs */}
-          <div className="flex items-center gap-2 flex-1">
-             
-             {/* NEW NAVIGATION TABS (RESTRICTED) */}
-             {onNavigate && (
-                <>
-                  {canViewMenuAndOrders && (
-                      <TooltipButton onClick={() => onNavigate(AppView.WAITER_PORTAL)} icon={Utensils} label="Restaurant Menu" colorClass="text-purple-600" />
-                  )}
-                  {canViewKitchen && (
-                      <TooltipButton onClick={() => onNavigate(AppView.KITCHEN)} icon={ChefHat} label="Kitchen Display" colorClass="text-orange-600" />
-                  )}
-                  {canViewMenuAndOrders && (
-                      <TooltipButton onClick={() => onNavigate(AppView.ORDERS)} icon={ClipboardList} label="Order Log" colorClass="text-blue-600" />
-                  )}
-                  
-                  <div className="w-px h-8 bg-gray-200 mx-1 hidden md:block"></div>
-                </>
-             )}
-             
-             {/* Restricted End Day */}
-             {onEndOfDay && canAccessRestrictedTabs && (
-                 <TooltipButton onClick={onEndOfDay} icon={Archive} label="End Day" colorClass="text-red-600" bgClass="bg-red-50 hover:bg-red-100 border-red-200" />
-             )}
-
-             {onStaffSwitch && <TooltipButton onClick={onStaffSwitch} icon={UserPlus} label="Staff" />}
-             
-             {/* Restricted Details Tab */}
-             {onRegisterDetails && canAccessRestrictedTabs && (
-                <TooltipButton onClick={onRegisterDetails} icon={Briefcase} label="Details" />
-             )}
-             
-          </div>
+            {/* Quick Navigation Shortcuts */}
+            <div className="flex gap-2 md:gap-2 ml-2 md:ml-3">
+               <BottomTabButton 
+                onClick={() => onNavigate(AppView.SELL)} 
+                icon={Utensils} 
+                colorClass="text-[#a855f7]" 
+               />
+               <BottomTabButton 
+                onClick={() => onNavigate(AppView.KITCHEN)} 
+                icon={ChefHat} 
+                colorClass="text-[#f97316]" 
+               />
+               <BottomTabButton 
+                onClick={() => onNavigate(AppView.ORDERS)} 
+                icon={ClipboardList} 
+                colorClass="text-[#3b82f6]" 
+               />
+            </div>
         </div>
-      )}
+
+        <div className="h-6 w-px bg-gray-100 mx-3 hidden md:block"></div>
+        
+        <div className="hidden lg:block">
+            <p className="text-[9px] font-bold text-gray-300 uppercase tracking-[0.3em]">Protocol v4.0.1</p>
+        </div>
+      </div>
     </header>
   );
 };

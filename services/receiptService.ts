@@ -1,124 +1,139 @@
-
-import { Order, SystemConfig } from '../types';
+import { Order, SystemConfig, ReturnRecord, Expense } from '../types';
 
 /**
  * Generates the HTML string for the receipt.
- * Used for both Printing (iframe) and Previewing (modal).
+ * Optimized for thermal printers with a precise 0.5-inch (12.7mm) bottom tail.
  */
 export const generateReceiptHtml = (
   config: SystemConfig, 
   order: Order | null, 
   type: 'RECEIPT' | 'KITCHEN' | 'KITCHEN_UPDATE' | 'VOID' | 'TEST' | 'BAR' | 'BAR_UPDATE' | 'SHIFT_REPORT',
-  extraData?: any
+  extraData?: any,
+  printedBy?: string 
 ): string => {
   const currency = config.currency || 'UGX';
   const fontSize = config.receipt.fontSize || 12;
   const paperWidth = config.receipt.paperWidth || '80mm';
   
-  // HARDCODED CONTACTS AS REQUESTED
-  const SUPPORT_PHONE = "+256 7413 50786";
-  const SUPPORT_EMAIL = "akamperpos@gmail.com";
+  // HARDCODED SYSTEM SUPPORT - Editable only by Master via SystemConfig
+  const SYSTEM_SUPPORT = "+256 74-1350 786";
+  const printInitiator = printedBy || "System Admin";
 
-  let itemsHtml = '';
-  if (order) {
-    order.items.forEach(item => {
-      itemsHtml += `
-        <div class="item-row">
-          <div class="item-qty">${item.quantity}x</div>
-          <div class="item-name">
-            ${item.product.name}
-            ${item.note ? `<div class="item-note">* ${item.note}</div>` : ''}
-          </div>
-          ${!['KITCHEN', 'KITCHEN_UPDATE', 'BAR', 'BAR_UPDATE'].includes(type) ? 
-            `<div class="item-price">${(item.product.price * item.quantity).toLocaleString()}</div>` : ''}
-        </div>
-      `;
-    });
-  }
+  const isKOT = ['KITCHEN', 'KITCHEN_UPDATE', 'BAR', 'BAR_UPDATE'].includes(type);
 
-  // --- SHIFT REPORT LOGIC ---
+  const sharedStyles = `
+    @media print {
+        @page { margin: 0; size: auto; }
+        body { margin: 0; }
+    }
+    html { margin: 0; padding: 0; background: #fff; height: auto; }
+    body {
+      padding: ${isKOT ? '1mm 2mm 12.7mm 2mm' : '4mm 6mm 12.7mm 6mm'}; 
+      width: ${paperWidth};
+      font-family: 'Courier New', Courier, monospace;
+      font-size: ${fontSize}pt;
+      color: #000;
+      box-sizing: border-box; 
+      margin: 0;
+      height: auto;
+      overflow-wrap: break-word;
+      word-wrap: break-word;
+      line-height: 1.1;
+    }
+    .text-center { text-align: center; }
+    .bold { font-weight: bold; }
+    .divider { border-top: 1px dashed #000; margin: 1.5mm 0; }
+    .row { display: flex; justify-content: space-between; margin-bottom: 0.8mm; }
+    .item-qty { width: 12%; font-weight: bold; }
+    .item-name { width: 58%; }
+    .item-price { width: 30%; text-align: right; font-weight: bold; }
+    .small { font-size: 0.85em; }
+    .footer-note { font-size: 0.8em; margin-top: 2mm; text-transform: uppercase; }
+    .header-kot { font-size: 1.1em; border: 1.5px solid #000; padding: 1.5mm; margin-bottom: 1.5mm; }
+  `;
+
   if (type === 'SHIFT_REPORT' && extraData) {
-      const d = extraData; // Short alias
+      const d = extraData;
       const now = new Date();
       
       return `
         <!DOCTYPE html>
         <html>
-        <head>
-          <title>Shift Report</title>
-          <style>
-            @page { size: auto; margin: 0mm; }
-            html, body {
-                height: auto;
-                margin: 0;
-                padding: 0;
-                background: #fff;
-            }
-            body { 
-                padding: 6.35mm 6.35mm 12.7mm 6.35mm; /* 1/4 inch sides, 1/2 inch bottom */
-                width: ${paperWidth}; 
-                font-family: 'Courier New', monospace; 
-                font-size: ${fontSize}pt; 
-                color: #000; 
-                box-sizing: border-box;
-            }
-            .receipt-container { width: 100%; }
-            .text-center { text-align: center; }
-            .text-right { text-align: right; }
-            .bold { font-weight: bold; }
-            .header { margin-bottom: 3mm; }
-            .divider { border-top: 1px dashed #000; margin: 2mm 0; }
-            .double-divider { border-top: 2px solid #000; margin: 2mm 0; }
-            .row { display: flex; justify-content: space-between; margin-bottom: 1mm; }
-            .section-title { font-weight: bold; text-decoration: underline; margin: 3mm 0 1mm 0; font-size: 1.1em; }
-            .footer { margin-top: 5mm; font-size: 0.8em; text-align: center; }
-          </style>
-        </head>
+        <head><style>${sharedStyles}</style></head>
         <body>
-          <div class="receipt-container">
-            <div class="header text-center">
-              <div class="bold" style="font-size: 1.3em;">${config.name}</div>
-              <div>SHIFT / EOD REPORT</div>
-              <div>${now.toLocaleDateString()} ${now.toLocaleTimeString()}</div>
-              <div>Cashier: ${d.printedBy}</div>
-            </div>
-
-            <div class="double-divider"></div>
-
-            <div class="section-title">SALES SUMMARY</div>
-            <div class="row"><span>Total Orders:</span> <span class="bold">${d.totalOrders}</span></div>
-            <div class="row"><span>Gross Revenue:</span> <span class="bold">${currency} ${d.totalRevenue.toLocaleString()}</span></div>
-            <div class="row"><span>Debt/Credit:</span> <span>${currency} ${d.due.toLocaleString()}</span></div>
+            <div class="text-center bold" style="font-size: 1.2em;">${config.name}</div>
+            <div class="text-center bold">SHIFT AUDIT REPORT</div>
+            <div class="text-center small">${now.toLocaleString()}</div>
+            <div class="divider"></div>
+            
+            <div class="bold small">FINANCIAL RECONCILIATION</div>
+            <div class="row"><span>Opening Cash:</span> <span>${currency} ${d.openingCash.toLocaleString()}</span></div>
+            <div class="row"><span>(+) Cash Sales:</span> <span>${currency} ${d.cashRevenue.toLocaleString()}</span></div>
+            <div class="row"><span>(-) Expenses:</span> <span>${currency} ${d.totalExpenses.toLocaleString()}</span></div>
+            <div class="divider"></div>
+            <div class="row bold"><span>Expected Drawer:</span> <span>${currency} ${d.netCash.toLocaleString()}</span></div>
+            
+            <div class="divider"></div>
+            <div class="bold small">DIGITAL & OTHER COLLECTIONS</div>
+            <div class="row"><span>Mobile Money:</span> <span>${currency} ${d.momoRevenue.toLocaleString()}</span></div>
+            <div class="row"><span>Cards/Bank:</span> <span>${currency} ${d.cardRevenue.toLocaleString()}</span></div>
+            <div class="row"><span>Staff Salary Pay:</span> <span>${currency} ${d.staffDebt.toLocaleString()}</span></div>
+            <div class="divider"></div>
+            <div class="row bold"><span>Total Revenue:</span> <span>${currency} ${d.totalRevenue.toLocaleString()}</span></div>
 
             <div class="divider"></div>
-
-            <div class="section-title">PAYMENT BREAKDOWN</div>
-            <div class="row"><span>CASH SALES:</span> <span class="bold">${currency} ${d.cash.toLocaleString()}</span></div>
-            <div class="row"><span>MOBILE MONEY:</span> <span>${currency} ${d.momo.toLocaleString()}</span></div>
-            <div class="row"><span>CARD / POS:</span> <span>${currency} ${d.card.toLocaleString()}</span></div>
-            <div class="row"><span>BANK TRANSFER:</span> <span>${currency} ${d.bank.toLocaleString()}</span></div>
-            <div class="row"><span>SALARY DEDUCT:</span> <span>${currency} ${d.salaryPay.toLocaleString()}</span></div>
-            <div class="row"><span>OTHER:</span> <span>${currency} ${d.others.toLocaleString()}</span></div>
-
+            <div class="bold small">AUDIT: VOIDS & DELETIONS</div>
+            <div class="row"><span>Total Orders:</span> <span>${d.totalOrders}</span></div>
+            <div class="row"><span>Voided Items/Orders:</span> <span>${d.voidCount || 0}</span></div>
+            
             <div class="divider"></div>
+            <div class="footer-note text-center">
+                <div class="bold">Report Generated By:</div>
+                <div style="font-size: 1.1em; color: #000;">${printInitiator}</div>
+            </div>
+            <div class="text-center small" style="margin-top: 4mm;">
+                <div class="bold">SYSTEM SUPPORT: ${SYSTEM_SUPPORT}</div>
+                <div>Powered by EAGLE 🦅 EYED POS</div>
+            </div>
+        </body>
+        </html>
+      `;
+  }
 
-            <div class="section-title text-center">*** CASH DRAWER ***</div>
-            <div class="row"><span>Opening Float:</span> <span>${currency} ${d.openingCash.toLocaleString()}</span></div>
-            <div class="row"><span>+ Cash Sales:</span> <span>${currency} ${d.cash.toLocaleString()}</span></div>
+  // Bar Ticket
+  if (type === 'BAR' || type === 'BAR_UPDATE') {
+      let itemsHtml = '';
+      if (order) {
+        order.items.forEach(item => {
+          if (type === 'BAR_UPDATE' && !item.isNew) return;
+          itemsHtml += `
+            <div class="row" style="align-items: flex-start;">
+              <div class="item-qty">${item.quantity}x</div>
+              <div class="item-name">${item.product.name.toUpperCase()}</div>
+              <div class="item-price">${(item.product.price * item.quantity).toLocaleString()}</div>
+            </div>
+            ${item.note ? `<div class="small italic" style="margin-bottom: 1mm;"> >> ${item.note}</div>` : ''}
+          `;
+        });
+      }
+
+      return `
+        <!DOCTYPE html>
+        <html>
+        <head><style>${sharedStyles}</style></head>
+        <body>
+            <div class="text-center">
+                <div class="bold header-kot">TABLE: ${order?.table || 'WALK-IN'}</div>
+                <div class="small bold">BAR TOKEN | ${type === 'BAR_UPDATE' ? 'ADD-ON' : 'NEW'}</div>
+            </div>
             <div class="divider"></div>
-            <div class="row bold" style="font-size: 1.2em;">
-                <span>EXPECTED CASH:</span>
-                <span>${currency} ${(d.openingCash + d.cash).toLocaleString()}</span>
-            </div>
-
-            <div class="footer">
-                <div style="margin-top: 5mm; border-top: 1px solid #000; padding-top: 2mm;">
-                    Manager Signature
-                </div>
-                <br/>
-                Powered by Akamper POS
-            </div>
-          </div>
+            <div class="row small"><span>WAITER:</span> <span class="bold">${(order?.staffName || 'Staff').toUpperCase()}</span></div>
+            <div class="row small"><span>TIME:</span> <span>${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
+            <div class="divider"></div>
+            <div class="items">${itemsHtml}</div>
+            <div class="divider"></div>
+            <div class="text-center bold small" style="opacity: 0.8; margin-top: 1mm;">--- BARMAN COPY ---</div>
+            <div class="text-center small" style="margin-top: 2mm; opacity: 0.6;">SUPPORT: ${SYSTEM_SUPPORT}</div>
         </body>
         </html>
       `;
@@ -127,217 +142,120 @@ export const generateReceiptHtml = (
   const headerTitle = {
     'RECEIPT': config.name,
     'KITCHEN': 'KITCHEN ORDER',
-    'BAR': 'BAR ORDER',
-    'KITCHEN_UPDATE': '** ADD-ON ORDER **',
-    'BAR_UPDATE': '** ADD-ON ORDER **',
+    'KITCHEN_UPDATE': '** KITCHEN ADD-ON **',
     'VOID': '** VOID SLIP **',
     'TEST': 'SYSTEM PRINT TEST'
   }[type] || config.name;
 
+  let itemsHtml = '';
+  if (order) {
+    order.items.forEach(item => {
+      if (type === 'KITCHEN_UPDATE' && !item.isNew) return;
+      itemsHtml += `
+        <div class="row" style="align-items: flex-start;">
+          <div class="item-qty">${item.quantity}x</div>
+          <div class="item-name">
+            ${item.product.name.toUpperCase()}
+            ${item.note ? `<div class="small italic" style="margin-top: 0.5mm;">Note: ${item.note}</div>` : ''}
+          </div>
+          ${(type === 'RECEIPT' || type === 'TEST' || type === 'VOID') ? 
+            `<div class="item-price">${(item.product.price * item.quantity).toLocaleString()}</div>` : ''}
+        </div>
+      `;
+    });
+  }
+
+  const isSalaryPay = order?.paymentMethod === 'SALARY_PAY';
+
   return `
     <!DOCTYPE html>
     <html>
-    <head>
-      <title>${headerTitle}</title>
-      <style>
-        /* Force printer to use roll settings, removing default headers/footers/margins */
-        @page {
-            size: auto;
-            margin: 0mm;
-        }
-        html, body {
-            height: auto;
-            margin: 0;
-            padding: 0;
-            background: #fff;
-        }
-        body {
-          /* 6.35mm ~= 1/4 inch side/top margins. 12.7mm ~= 1/2 inch bottom margin */
-          padding: 6.35mm 6.35mm 12.7mm 6.35mm;
-          width: ${paperWidth};
-          font-family: 'Courier New', monospace;
-          font-size: ${fontSize}pt;
-          color: #000;
-          box-sizing: border-box; /* Ensures padding includes width */
-        }
-        .receipt-container { 
-            width: 100%; 
-        }
-        .text-center { text-align: center; }
-        .text-right { text-align: right; }
-        .bold { font-weight: bold; }
-        .header { margin-bottom: 3mm; }
-        .logo { max-width: 60%; height: auto; display: block; margin: 0 auto 2mm auto; }
-        .divider { border-top: 1px dashed #000; margin: 2mm 0; }
-        .meta-row { display: flex; justify-content: space-between; font-size: 0.9em; margin-bottom: 0.5mm; }
-        
-        .item-row { 
-            display: flex; 
-            align-items: flex-start; 
-            margin-bottom: 1.5mm; 
-        }
-        .item-qty { 
-            width: 10%; 
-            font-weight: bold; 
-            flex-shrink: 0; 
-        }
-        .item-name { 
-            width: 60%; 
-            padding-right: 2mm;
-            overflow-wrap: break-word; 
-            word-wrap: break-word;
-            word-break: break-word;
-        }
-        .item-price { 
-            width: 30%; 
-            text-align: right; 
-            font-weight: bold; 
-            flex-shrink: 0; 
-        }
-        .item-note { font-style: italic; font-size: 0.85em; margin-top: 0.5mm; }
-        
-        .total-section { margin-top: 3mm; font-size: 1.1em; }
-        .footer { margin-top: 5mm; font-size: 0.8em; line-height: 1.3; }
-        .status-badge { 
-           display: block; 
-           text-align: center; 
-           border: 2px solid #000; 
-           padding: 1.5mm; 
-           margin: 3mm 0;
-           font-weight: 900;
-           text-transform: uppercase;
-        }
-      </style>
-    </head>
+    <head><style>${sharedStyles}</style></head>
     <body>
-      <div class="receipt-container">
-        <div class="header text-center">
-          ${(config.receipt.showLogo && config.logo) ? `<img src="${config.logo}" class="logo" />` : ''}
-          <div class="bold" style="font-size: 1.2em;">${headerTitle}</div>
-          ${type === 'RECEIPT' && config.receipt.headerText ? `<div style="margin-top: 1mm; white-space: pre-wrap;">${config.receipt.headerText}</div>` : ''}
-          ${config.receipt.headerPhone ? `<div>Tel: ${config.receipt.headerPhone}</div>` : ''}
-          ${config.receipt.headerEmail ? `<div>Email: ${config.receipt.headerEmail}</div>` : ''}
+        <div class="text-center">
+          ${(config.receipt.showLogo && config.logo && type === 'RECEIPT') ? `<img src="${config.logo}" style="max-width: 60%; margin-bottom: 2mm;" />` : ''}
+          <div class="bold ${isKOT ? 'header-kot' : ''}" style="font-size: 1.1em;">${headerTitle}</div>
+          ${type === 'RECEIPT' && config.receipt.headerText ? `<div class="small" style="margin-top: 1mm;">${config.receipt.headerText}</div>` : ''}
         </div>
 
         <div class="divider"></div>
 
         ${order ? `
-          <div class="meta-row"><span>Date:</span> <span>${new Date(order.timestamp).toLocaleDateString()} ${new Date(order.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span></div>
-          <div class="meta-row"><span>Ticket #:</span> <span class="bold">${order.id.slice(-6).toUpperCase()}</span></div>
-          <div class="meta-row"><span class="bold">Table:</span> <span class="bold" style="font-size: 1.1em;">${order.table}</span></div>
-          <div class="meta-row"><span>Waiter:</span> <span>${(order.staffName || 'N/A').toUpperCase()}</span></div>
+          <div class="row small"><span>DATE/TIME:</span> <span>${new Date(order.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</span></div>
+          <div class="row small"><span class="bold">TABLE:</span> <span class="bold" style="font-size: 1.2em;">${order.table}</span></div>
+          <div class="row small"><span>SERVED BY (WAITER):</span> <span class="bold">${(order.staffName || 'Staff').toUpperCase()}</span></div>
         ` : ''}
 
         <div class="divider"></div>
-
-        <div class="items">
-          ${itemsHtml}
-        </div>
-
+        <div class="items">${itemsHtml}</div>
         <div class="divider"></div>
 
-        ${!['KITCHEN', 'KITCHEN_UPDATE', 'BAR', 'BAR_UPDATE'].includes(type) && order ? `
-          <div class="total-section">
-            <div class="meta-row bold">
-              <span>TOTAL</span>
-              <span>${currency} ${order.grandTotal.toLocaleString()}</span>
-            </div>
-            ${order.paymentMethod ? `
-              <div class="meta-row" style="font-size: 0.8em; margin-top: 2mm;">
-                <span>Method:</span>
-                <span>${order.paymentMethod.replace('_', ' ')}</span>
-              </div>
-            ` : ''}
-            ${order.paymentMethod === 'SALARY_PAY' ? `
-              <div class="status-badge">Salary Deduction</div>
-              <div class="text-center bold" style="font-size: 0.9em;">Staff: ${order.customerName.replace(' (Staff)', '')}</div>
-            ` : ''}
+        ${type === 'RECEIPT' && order ? `
+          <div class="row bold" style="font-size: 1.1em;">
+            <span>GRAND TOTAL</span>
+            <span>${currency} ${order.grandTotal.toLocaleString()}</span>
           </div>
+          <div class="row small" style="margin-top: 1mm;"><span>ITEMS COUNT:</span> <span>${order.items.reduce((acc, i) => acc + i.quantity, 0)}</span></div>
+          ${order.paymentMethod ? `<div class="row small" style="margin-top: 2mm;"><span>PAYMENT MODE:</span> <span class="bold">${order.paymentMethod.replace('_', ' ')}</span></div>` : ''}
+          
+          <div class="divider"></div>
+          <div class="footer-note">
+              <div class="row"><span>CASHIER:</span> <span class="bold">${printInitiator.toUpperCase()}</span></div>
+          </div>
+
+          ${isSalaryPay ? `
+            <div class="divider"></div>
+            <div class="small">
+                <div class="text-center bold" style="margin-bottom: 2mm; border: 1px solid #000; padding: 1mm;">SALARY PAY RECORD</div>
+                <div class="row"><span>STAFF NAME:</span> <span class="bold">${(order.customerName || 'N/A').toUpperCase()}</span></div>
+                <div style="margin-top: 6mm; border-bottom: 1.5px solid #000; width: 100%; height: 8mm;">SIGNATURE: </div>
+                <div class="text-center" style="font-size: 0.7em; margin-top: 1mm; opacity: 0.8;">I authorize deduction from my salary</div>
+            </div>
+          ` : ''}
         ` : ''}
 
-        ${type === 'VOID' && extraData ? `
-          <div class="status-badge">CANCELLED</div>
-          <div class="text-center" style="margin-bottom: 5mm;">${extraData.reason || 'No reason provided'}</div>
-          <div class="meta-row"><span>Auth:</span> <span>${extraData.authorizedBy || 'Admin'}</span></div>
-        ` : ''}
-
-        <div class="footer text-center">
-          ${['KITCHEN', 'KITCHEN_UPDATE', 'BAR', 'BAR_UPDATE'].includes(type) ? `
-            <div class="bold" style="font-size: 1.2em;">--- END ORDER ---</div>
-          ` : `
-            ${config.receipt.footerText ? `<div style="white-space: pre-wrap;">${config.receipt.footerText}</div>` : ''}
-            
-            <div style="margin-top: 3mm; font-weight: bold; font-size: 0.9em; border-top: 1px dotted #000; padding-top: 2mm;">SYSTEM SUPPORT</div>
-            <div>${SUPPORT_PHONE}</div>
-            
-            <div style="margin-top: 4mm; font-size: 0.7em;">Powered by Akamper POS</div>
-          `}
+        <div class="divider"></div>
+        <div class="text-center small">
+            ${config.receipt.footerText ? `<div style="margin-bottom: 1mm;">${config.receipt.footerText}</div>` : ''}
+            <div class="bold" style="font-size: 1.1em;">SYSTEM SUPPORT: ${SYSTEM_SUPPORT}</div>
+            <div style="margin-top: 1mm; opacity: 0.7; font-size: 0.8em;">Powered by EAGLE 🦅 EYED POS</div>
         </div>
-      </div>
     </body>
     </html>
   `;
 };
 
-/**
- * Prints the receipt silently using an invisible iframe.
- * Uses a robust loading strategy to ensure content is ready before printing.
- */
 export const printReceipt = (
   config: SystemConfig, 
   order: Order | null, 
   type: 'RECEIPT' | 'KITCHEN' | 'KITCHEN_UPDATE' | 'VOID' | 'TEST' | 'BAR' | 'BAR_UPDATE' | 'SHIFT_REPORT',
-  extraData?: any
+  extraData?: any,
+  printedBy?: string
 ) => {
-  // 1. Generate Content
-  const htmlContent = generateReceiptHtml(config, order, type, extraData);
-
-  // 2. Create Hidden Iframe
-  // Use position absolute off-screen instead of visibility:hidden to avoid some browser rendering optimizations that block printing
+  const htmlContent = generateReceiptHtml(config, order, type, extraData, printedBy);
   const iframe = document.createElement('iframe');
-  iframe.style.position = 'fixed';
-  iframe.style.left = '-9999px';
-  iframe.style.top = '-9999px';
-  iframe.style.width = '0px';
-  iframe.style.height = '0px';
-  iframe.style.border = 'none';
+  Object.assign(iframe.style, { position: 'absolute', width: '0', height: '0', border: 'none', visibility: 'hidden' });
   document.body.appendChild(iframe);
 
-  // 3. Define Print Function
+  const doc = iframe.contentWindow?.document;
+  if (!doc) return;
+
+  doc.open();
+  doc.write(htmlContent);
+  doc.close();
+
   const triggerPrint = () => {
-    try {
       if (iframe.contentWindow) {
-        iframe.contentWindow.focus();
-        iframe.contentWindow.print();
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+          setTimeout(() => { if (document.body.contains(iframe)) document.body.removeChild(iframe); }, 1000);
       }
-    } catch (e) {
-      console.error("Printing failed", e);
-    } finally {
-      // Cleanup after a delay
-      setTimeout(() => {
-        if (document.body.contains(iframe)) {
-          document.body.removeChild(iframe);
-        }
-      }, 1000);
-    }
   };
 
-  // 4. Attach Load Listener BEFORE Writing Content
-  // This ensures we don't miss the load event if it fires synchronously or very fast
-  iframe.onload = triggerPrint;
-
-  // 5. Write to Iframe
-  const doc = iframe.contentWindow?.document;
-  if (doc) {
-    doc.open();
-    doc.write(htmlContent);
-    doc.close();
-  } else {
-    console.error("Iframe document not accessible");
-    if (document.body.contains(iframe)) document.body.removeChild(iframe);
-  }
+  if (doc.readyState === 'complete') triggerPrint();
+  else iframe.onload = triggerPrint;
 };
 
-export const printTestReceipt = (config: SystemConfig) => {
-    printReceipt(config, null, 'TEST');
+export const printTestReceipt = (config: SystemConfig, printedBy?: string) => {
+    printReceipt(config, null, 'TEST', null, printedBy);
 };

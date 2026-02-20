@@ -1,31 +1,85 @@
-
-import React, { useState, useEffect, useRef } from 'react';
-import { X, Delete, ArrowUp, Globe, CornerDownLeft, Space, Hash, Type, ChevronDown } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { 
+  X, Delete, ArrowUp, CornerDownLeft, Space, 
+  Minimize2, Maximize2, GripHorizontal,
+  Plus, Minus
+} from 'lucide-react';
 
 interface VirtualKeyboardProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
+const STORAGE_KEY_POS = 'eagle_eyed_vk_pos';
+const STORAGE_KEY_SCALE = 'eagle_eyed_vk_scale';
+
 const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ isOpen, onClose }) => {
   const [layout, setLayout] = useState<'ALPHA' | 'NUMERIC' | 'SYMBOLS'>('ALPHA');
   const [isShift, setIsShift] = useState(false);
   const [isCaps, setIsCaps] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 1024);
   
-  // Track the last focused element to target input
+  const [scale, setScale] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_SCALE);
+    return saved ? parseFloat(saved) : 1;
+  });
+
+  const [position, setPosition] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_POS);
+    if (saved) {
+        try { return JSON.parse(saved); } catch (e) { return { x: window.innerWidth - 650, y: window.innerHeight - 450 }; }
+    }
+    return { x: window.innerWidth - 650, y: window.innerHeight - 450 };
+  });
+
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  
+  const keyboardRef = useRef<HTMLDivElement>(null);
   const lastActiveElementRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
-    if (isOpen) {
+    const handleResize = () => {
+      const desktop = window.innerWidth >= 1024;
+      setIsDesktop(desktop);
+      if (!desktop && isOpen) onClose();
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [isOpen, onClose]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_POS, JSON.stringify(position));
+  }, [position]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_SCALE, scale.toString());
+  }, [scale]);
+
+  useEffect(() => {
+    if (isOpen && isDesktop) {
+      const kbWidth = 600 * scale;
+      const kbHeight = (isMinimized ? 60 : 350) * scale;
+      
+      let newX = position.x;
+      let newY = position.y;
+
+      if (newX + 50 > window.innerWidth) newX = window.innerWidth - kbWidth - 20;
+      if (newY + 50 > window.innerHeight) newY = window.innerHeight - kbHeight - 20;
+      if (newX < 0) newX = 20;
+      if (newY < 0) newY = 20;
+
+      if (newX !== position.x || newY !== position.y) {
+          setPosition({ x: newX, y: newY });
+      }
+
       const handleFocus = () => {
         const active = document.activeElement;
-        if (active && (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)) {
+        if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
           lastActiveElementRef.current = active;
-          
-          // Auto-switch layout based on input type
-          const inputType = active.getAttribute('type');
           const inputMode = active.getAttribute('inputmode');
-          if (inputType === 'number' || inputMode === 'numeric' || inputMode === 'decimal') {
+          if (inputMode === 'numeric' || inputMode === 'decimal') {
             setLayout('NUMERIC');
           } else {
             setLayout('ALPHA');
@@ -33,18 +87,54 @@ const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ isOpen, onClose }) =>
         }
       };
 
-      // Initial check
       handleFocus();
-
       document.addEventListener('focusin', handleFocus);
       return () => document.removeEventListener('focusin', handleFocus);
     }
-  }, [isOpen]);
+  }, [isOpen, scale, isMinimized, isDesktop]);
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    const handleMove = (clientX: number, clientY: number) => {
+      if (!isDragging) return;
+      const kbWidth = 600 * scale;
+      const kbHeight = (isMinimized ? 60 : 320) * scale;
+      const margin = 10;
+      let nextX = Math.max(margin, Math.min(clientX - dragOffset.x, window.innerWidth - kbWidth - margin));
+      let nextY = Math.max(margin, Math.min(clientY - dragOffset.y, window.innerHeight - kbHeight - margin));
+      setPosition({ x: nextX, y: nextY });
+    };
+
+    const onMouseMove = (e: MouseEvent) => handleMove(e.clientX, e.clientY);
+    const onTouchMove = (e: TouchEvent) => {
+        if (isDragging) e.preventDefault();
+        handleMove(e.touches[0].clientX, e.touches[0].clientY);
+    };
+    const onEnd = () => setIsDragging(false);
+
+    if (isDragging) {
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onEnd);
+      window.addEventListener('touchmove', onTouchMove, { passive: false });
+      window.addEventListener('touchend', onEnd);
+    }
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onEnd);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onEnd);
+    };
+  }, [isDragging, dragOffset, scale, isMinimized]);
+
+  if (!isOpen || !isDesktop) return null;
+
+  const handleScaleChange = (delta: number) => {
+    setScale(prev => {
+        const newVal = Math.max(0.7, Math.min(1.5, prev + delta));
+        return parseFloat(newVal.toFixed(1));
+    });
+  };
 
   const handleKeyPress = (key: string) => {
-    // Fix: Properly narrow type of target element to HTMLInputElement or HTMLTextAreaElement to access selection and value properties
     const active = document.activeElement;
     const target = (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)
       ? active
@@ -52,11 +142,9 @@ const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ isOpen, onClose }) =>
     
     if (!target) return;
 
-    // Fix: target is now narrowed correctly
     const start = target.selectionStart || 0;
     const end = target.selectionEnd || 0;
     const currentValue = target.value;
-
     let newValue = currentValue;
     let newCursorPos = start;
 
@@ -78,8 +166,6 @@ const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ isOpen, onClose }) =>
       } else {
         const event = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', which: 13, bubbles: true });
         target.dispatchEvent(event);
-        // Fix: target is narrowed correctly
-        target.blur();
         return; 
       }
     } else {
@@ -91,9 +177,8 @@ const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ isOpen, onClose }) =>
       newCursorPos = start + 1;
     }
 
-    // Trigger React's onChange by using the native value setter
     const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-      target.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
+      target instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
       'value'
     )?.set;
 
@@ -101,176 +186,107 @@ const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ isOpen, onClose }) =>
       nativeInputValueSetter.call(target, newValue);
       target.dispatchEvent(new Event('input', { bubbles: true }));
     } else {
-      // Fix: target is narrowed correctly
       target.value = newValue;
     }
     
-    // Fix: target is narrowed correctly
     target.focus();
-    target.setSelectionRange(newCursorPos, newCursorPos);
-    
+    try { target.setSelectionRange(newCursorPos, newCursorPos); } catch (e) {}
     if (isShift && !isCaps) setIsShift(false);
   };
 
-  const preventBlur = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const onStartDrag = (clientX: number, clientY: number) => {
+    setIsDragging(true);
+    setDragOffset({ x: clientX - position.x, y: clientY - position.y });
   };
 
-  const alphaLayout = [
+  const alphaRows = [
+    ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
     ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
     ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
     ['z', 'x', 'c', 'v', 'b', 'n', 'm']
   ];
 
-  const symbolLayout = [
-    ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
-    ['-', '/', ':', ';', '(', ')', '$', '&', '@', '"'],
-    ['.', ',', '?', '!', "'", '#', '%', '^', '*', '+']
-  ];
+  const Key = ({ val, flex = 1, isAction = false, isSpecial = false, onClick, children }: any) => {
+    const displayLabel = useMemo(() => {
+        if (layout === 'ALPHA' && val && /^[a-z]$/.test(val)) {
+            return (isShift || isCaps) ? val.toUpperCase() : val.toLowerCase();
+        }
+        return val;
+    }, [val, layout, isShift, isCaps]);
 
-  const numericPadLayout = [
-    ['1', '2', '3'],
-    ['4', '5', '6'],
-    ['7', '8', '9'],
-    ['.', '0', 'BACKSPACE']
-  ];
+    return (
+        <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onClick ? onClick() : handleKeyPress(val)}
+            className={`rounded-lg font-black transition-all active:scale-95 shadow-[0_3px_0_rgba(0,0,0,0.3)] active:shadow-none select-none ${isAction ? 'bg-indigo-600 text-white hover:bg-indigo-500' : isSpecial ? 'bg-slate-800 text-slate-400 hover:bg-slate-700' : 'bg-slate-700 text-white hover:bg-slate-600 border border-slate-600/30'} flex items-center justify-center`}
+            style={{ flex, height: `${42 * scale}px`, fontSize: `${15 * scale}px` }}
+        >
+            {children || displayLabel}
+        </button>
+    );
+  };
 
   return (
     <div 
-      className="fixed bottom-0 left-0 right-0 bg-slate-900 p-4 pb-8 z-[9999] shadow-[0_-12px_40px_rgba(0,0,0,0.6)] border-t border-slate-800 animate-in slide-in-from-bottom-10 duration-300 select-none"
-      onMouseDown={preventBlur}
+      ref={keyboardRef}
+      style={{ left: position.x, top: position.y, width: `${600 * scale}px`, zIndex: 9999 }}
+      className="fixed pointer-events-auto select-none transition-shadow duration-300"
     >
-      <div className="max-w-4xl mx-auto flex flex-col gap-4">
-        
-        {/* Keyboard Toolbar */}
-        <div className="flex justify-between items-center px-2 mb-1">
-          <div className="flex items-center gap-4">
-            <div className="flex bg-slate-800 p-1 rounded-xl">
-              <button 
-                onClick={() => setLayout('ALPHA')}
-                className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all flex items-center gap-2 ${layout === 'ALPHA' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
-              >
-                <Type className="w-3.5 h-3.5" /> ABC
-              </button>
-              <button 
-                onClick={() => setLayout('NUMERIC')}
-                className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all flex items-center gap-2 ${layout === 'NUMERIC' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
-              >
-                <Hash className="w-3.5 h-3.5" /> 123
-              </button>
-              <button 
-                onClick={() => setLayout('SYMBOLS')}
-                className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all flex items-center gap-2 ${layout === 'SYMBOLS' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
-              >
-                #+=
-              </button>
+        <div className={`flex flex-col shadow-[0_20px_60px_rgba(0,0,0,0.6)] rounded-[2rem] border border-slate-800 overflow-hidden ${isMinimized ? 'w-fit' : 'w-full'}`}>
+            <div 
+                onMouseDown={(e) => onStartDrag(e.clientX, e.clientY)}
+                onTouchStart={(e) => onStartDrag(e.touches[0].clientX, e.touches[0].clientY)}
+                className={`bg-slate-900 border-b border-slate-800 flex items-center justify-between h-12 px-5 cursor-grab active:cursor-grabbing ${isDragging ? 'bg-indigo-900/40' : ''} transition-colors`}
+            >
+                 <div className="flex items-center gap-3">
+                    <GripHorizontal className="w-5 h-5 text-slate-600" />
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Input Terminal</span>
+                 </div>
+                 <div className="flex gap-1.5 items-center">
+                    <div className="flex items-center bg-slate-800 rounded-xl px-1 mr-3 border border-slate-700">
+                      <button onClick={(e) => { e.stopPropagation(); handleScaleChange(-0.1); }} className="p-2 text-slate-400 hover:text-white transition-colors active:scale-75"><Minus className="w-4 h-4" /></button>
+                      <span className="text-[10px] font-black text-indigo-400 px-2 w-10 text-center">{Math.round(scale * 100)}%</span>
+                      <button onClick={(e) => { e.stopPropagation(); handleScaleChange(0.1); }} className="p-2 text-slate-400 hover:text-white transition-colors active:scale-75"><Plus className="w-4 h-4" /></button>
+                    </div>
+                    <button onClick={(e) => { e.stopPropagation(); setIsMinimized(!isMinimized); }} className="p-2 text-slate-500 hover:text-white transition-colors">{isMinimized ? <Maximize2 className="w-5 h-5" /> : <Minimize2 className="w-5 h-5" />}</button>
+                    <button onClick={(e) => { e.stopPropagation(); onClose(); }} className="p-2 text-slate-500 hover:text-red-500 transition-colors"><X className="w-5 h-5" /></button>
+                 </div>
             </div>
-            <div className="hidden sm:flex items-center gap-2 text-slate-500 font-bold uppercase tracking-[0.2em] text-[10px]">
-              <Globe className="w-3 h-3" /> Akampa System Input
-            </div>
-          </div>
-          
-          <button 
-            onClick={onClose} 
-            className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-red-900/40 text-slate-300 hover:text-white rounded-xl transition-all font-black text-[10px] uppercase tracking-widest border border-slate-700"
-          >
-            <ChevronDown className="w-4 h-4" /> Hide Keyboard
-          </button>
+            {!isMinimized && (
+                <div className="bg-slate-900/95 backdrop-blur-3xl p-3 flex flex-col animate-in slide-in-from-top-2 duration-200" style={{ gap: `${8 * scale}px` }}>
+                    {layout === 'ALPHA' && (
+                      <>
+                        <div className="flex" style={{ gap: `${6 * scale}px` }}>{alphaRows[0].map(key => <Key key={key} val={key} isSpecial={true} />)}</div>
+                        {alphaRows.slice(1, 3).map((row, rIdx) => (
+                          <div key={rIdx} className="flex" style={{ gap: `${6 * scale}px`, paddingLeft: `${10 * scale}px`, paddingRight: `${10 * scale}px` }}>{row.map(key => <Key key={key} val={key} />)}</div>
+                        ))}
+                        <div className="flex" style={{ gap: `${6 * scale}px` }}>
+                          <Key val="SHIFT" flex={1.5} onClick={() => setIsShift(!isShift)} isAction={isShift || isCaps}><ArrowUp className="w-5 h-5" style={{ width: `${18 * scale}px`, height: `${18 * scale}px` }} /></Key>
+                          {alphaRows[3].map(key => <Key key={key} val={key} />)}
+                          <Key val="BACKSPACE" flex={1.5} isAction={true}><Delete className="w-6 h-6" style={{ width: `${22 * scale}px`, height: `${22 * scale}px` }} /></Key>
+                        </div>
+                        <div className="flex" style={{ gap: `${6 * scale}px` }}>
+                          <Key val="?123" flex={1.5} isSpecial={true} onClick={() => setLayout('SYMBOLS')} />
+                          <Key val="," flex={1} /><Key val="SPACE" flex={5} /><Key val="." flex={1} />
+                          <Key val="ENTER" flex={1.5} isAction={true}><CornerDownLeft className="w-6 h-6" style={{ width: `${22 * scale}px`, height: `${22 * scale}px` }} /></Key>
+                        </div>
+                      </>
+                    )}
+                    {(layout === 'NUMERIC' || layout === 'SYMBOLS') && (
+                      <div className="flex flex-col animate-in fade-in duration-200" style={{ gap: `${8 * scale}px` }}>
+                        <div className="flex" style={{ gap: `${6 * scale}px` }}>{['1','2','3','4','5','6','7','8','9','0'].map(k => <Key key={k} val={k} />)}</div>
+                        <div className="flex" style={{ gap: `${6 * scale}px` }}>{['@','#','$','_','&','-','+','(',')','/'].map(k => <Key key={k} val={k} isSpecial={true} />)}</div>
+                        <div className="flex" style={{ gap: `${6 * scale}px` }}>{['*','"',"'",':',';','!','?','\\','|','`'].map(k => <Key key={k} val={k} isSpecial={true} />)}</div>
+                        <div className="flex" style={{ gap: `${6 * scale}px` }}>
+                            <Key val="ABC" flex={1.5} isAction={true} onClick={() => setLayout('ALPHA')} />
+                            <Key val="[" flex={1} isSpecial={true} /><Key val="SPACE" flex={4} /><Key val="]" flex={1} isSpecial={true} />
+                            <Key val="BACKSPACE" flex={1.5} isAction={true}><Delete className="w-6 h-6" style={{ width: `${22 * scale}px`, height: `${22 * scale}px` }} /></Key>
+                        </div>
+                      </div>
+                    )}
+                </div>
+            )}
         </div>
-
-        {/* Layout Engine */}
-        {layout === 'NUMERIC' ? (
-          <div className="flex justify-center gap-6">
-            <div className="grid grid-cols-3 gap-3 w-full max-w-sm">
-              {numericPadLayout.flat().map((key) => (
-                <button
-                  key={key}
-                  onMouseDown={preventBlur}
-                  onClick={() => handleKeyPress(key)}
-                  className={`h-16 rounded-2xl font-black text-2xl shadow-lg border-b-4 transition-all active:border-b-0 active:translate-y-1 ${
-                    key === 'BACKSPACE' 
-                      ? 'bg-red-600 text-white border-red-900 flex items-center justify-center' 
-                      : 'bg-slate-700 text-white border-slate-950 hover:bg-slate-600'
-                  }`}
-                >
-                  {key === 'BACKSPACE' ? <Delete className="w-8 h-8" /> : key}
-                </button>
-              ))}
-            </div>
-            <div className="flex flex-col gap-3 w-32">
-                <button 
-                  onMouseDown={preventBlur} 
-                  onClick={() => handleKeyPress('ENTER')}
-                  className="flex-1 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-lg border-b-4 border-blue-900 active:border-b-0 active:translate-y-1 flex flex-col items-center justify-center gap-2"
-                >
-                  <CornerDownLeft className="w-6 h-6" />
-                  Enter
-                </button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {/* Standard Key Rows */}
-            {(layout === 'ALPHA' ? alphaLayout : symbolLayout).map((row, idx) => (
-              <div key={idx} className="flex gap-2 justify-center">
-                {idx === 2 && layout === 'ALPHA' && (
-                  <button 
-                    onMouseDown={preventBlur}
-                    onClick={() => { setIsShift(!isShift); if(isShift && isCaps) setIsCaps(false); }} 
-                    onDoubleClick={() => setIsCaps(!isCaps)}
-                    className={`flex-[1.5] h-14 rounded-xl font-black shadow-lg border-b-4 transition-all flex items-center justify-center max-w-[90px] ${
-                      isShift || isCaps ? 'bg-blue-600 text-white border-blue-900' : 'bg-slate-800 text-slate-400 border-slate-950 hover:bg-slate-700'
-                    }`}
-                  >
-                    <ArrowUp className={`w-6 h-6 ${isCaps ? 'fill-current' : ''}`} />
-                  </button>
-                )}
-
-                {row.map(key => (
-                  <button 
-                    key={key} 
-                    onMouseDown={preventBlur} 
-                    onClick={() => handleKeyPress(key)} 
-                    className="flex-1 h-14 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-black text-xl shadow-lg border-b-4 border-slate-950 active:border-b-0 active:translate-y-1 transition-all max-w-[75px] uppercase"
-                  >
-                    {layout === 'ALPHA' ? ((isShift || isCaps) ? key.toUpperCase() : key) : key}
-                  </button>
-                ))}
-
-                {idx === 2 && (
-                  <button onMouseDown={preventBlur} onClick={() => handleKeyPress('BACKSPACE')} className="flex-[1.5] h-14 bg-slate-800 hover:bg-red-900 text-white rounded-xl font-black shadow-lg border-b-4 border-slate-950 active:border-b-0 active:translate-y-1 transition-all flex items-center justify-center max-w-[90px]">
-                    <Delete className="w-6 h-6" />
-                  </button>
-                )}
-              </div>
-            ))}
-
-            {/* Bottom Row */}
-            <div className="flex gap-2 justify-center mt-1 px-4">
-                <button onMouseDown={preventBlur} onClick={() => handleKeyPress(',')} className="flex-1 h-14 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-black text-xl border-b-4 border-slate-950 max-w-[75px]">
-                    ,
-                </button>
-
-                <button 
-                  onMouseDown={preventBlur} 
-                  onClick={() => handleKeyPress('SPACE')} 
-                  className="flex-[6] h-14 bg-slate-700 hover:bg-slate-600 text-slate-400 rounded-xl font-black text-xs uppercase tracking-[0.6em] shadow-lg border-b-4 border-slate-950 active:border-b-0 active:translate-y-1 transition-all flex items-center justify-center"
-                >
-                  <Space className="w-5 h-5 opacity-40 mr-2" /> Space
-                </button>
-
-                <button onMouseDown={preventBlur} onClick={() => handleKeyPress('.')} className="flex-1 h-14 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-black text-xl border-b-4 border-slate-950 max-w-[75px]">
-                    .
-                </button>
-
-                <button onMouseDown={preventBlur} onClick={() => handleKeyPress('ENTER')} className="flex-[2] h-14 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-black shadow-lg border-b-4 border-blue-900 active:border-b-0 active:translate-y-1 transition-all flex items-center justify-center max-w-[140px] gap-2 uppercase text-xs tracking-widest">
-                    <CornerDownLeft className="w-5 h-5" />
-                </button>
-            </div>
-          </div>
-        )}
-      </div>
     </div>
   );
 };

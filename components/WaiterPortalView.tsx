@@ -1,13 +1,13 @@
-
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { 
-  Utensils, Coffee, Search, ShoppingCart, LogOut, ArrowLeft, 
-  Trash2, Send, Plus, Minus, ChefHat, X, CheckCircle2, Beer, Printer, CheckSquare, Square,
-  LayoutGrid, Armchair, Wine, GlassWater, Clock, Receipt, Calendar, ChevronRight, User, MessageSquare, Edit3, Image as ImageIcon,
-  StickyNote
+  Utensils, Search, ShoppingCart, ArrowLeft, Plus, Minus, ChefHat, X, Martini, 
+  User, Edit3, Grid, List, Clock, CheckCircle2, ChevronRight, Lock, ShieldCheck, AlertCircle, MapPin,
+  RotateCcw, Eye, Printer, FileText, MessageSquare, ChevronLeft, ClipboardList, Wallet, CheckSquare, XCircle,
+  History, GlassWater, AlertTriangle
 } from 'lucide-react';
-import { Order, Product, SystemConfig, StaffMember, Table, OrderItem, AppView, SpiritBottle } from '../types';
+import { Order, Product, SystemConfig, StaffMember, Table, OrderItem, AppView, SpiritBottle, SectionAllocation, SpiritLog } from '../types';
 import { printReceipt } from '../services/receiptService';
+import ReceiptPreviewModal from './ReceiptPreviewModal';
 
 interface WaiterPortalViewProps {
   orders: Order[];
@@ -18,108 +18,48 @@ interface WaiterPortalViewProps {
   tables: Table[];
   onLogout: () => void;
   onNavigate: (view: AppView) => void;
-  onPlaceOrder: (order: Order) => void;
-  onUpdateOrder: (order: Order) => void;
+  onPlaceOrder: (order: Order, silent?: boolean) => void;
+  onUpdateOrder: (order: Order, silent?: boolean) => void;
   onDeleteOrder: (orderId: string, reason: string) => void;
   onItemReturn: (orderId: string, timestamp: Date, items: OrderItem[], refund: number, reason: string) => void;
-  bottles?: SpiritBottle[];
-  onUpdateBottles?: (bottles: SpiritBottle[]) => void;
+  bottles: SpiritBottle[];
+  onUpdateBottles: (bottles: SpiritBottle[]) => void;
+  allocations: SectionAllocation[];
+  onClaimSection: (section: string) => void;
 }
 
-const COMMON_NOTES = ["No Salt", "Less Sugar", "Spicy", "No Ice", "Well Done", "Medium Rare", "Extra Sauce", "Takeaway", "No Onions", "Hot"];
-
 const WaiterPortalView: React.FC<WaiterPortalViewProps> = ({ 
-  orders, products, systemConfig, currentUser, tables, onLogout, onPlaceOrder, onUpdateOrder
+  orders, products, systemConfig, currentUser, tables, onLogout, onPlaceOrder, onUpdateOrder, onDeleteOrder,
+  allocations, onClaimSection, bottles, onUpdateBottles
 }) => {
   const [activeTab, setActiveTab] = useState<'TABLES' | 'MENU' | 'MY_ORDERS'>('TABLES');
   const [selectedTable, setSelectedTable] = useState<Table | null>(null);
   const [currentOrder, setCurrentOrder] = useState<Order | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('All');
+  const [selectedCategory, setSelectedCategory] = useState('ALL');
+  const [accessError, setAccessError] = useState<string | null>(null);
   
-  // Measure Modal
+  // Spirit Integration State
   const [measureModalOpen, setMeasureModalOpen] = useState(false);
-  const [pendingProduct, setPendingProduct] = useState<Product | null>(null);
+  const [bottleSelectModalOpen, setBottleSelectModalOpen] = useState(false);
+  const [pendingSpiritProduct, setPendingSpiritProduct] = useState<Product | null>(null);
+  const [activeBottlePour, setActiveBottlePour] = useState<{product: Product, variantName: string, variantPrice: number} | null>(null);
 
-  // Note/Comment Modal
   const [noteModalOpen, setNoteModalOpen] = useState(false);
   const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
   const [noteText, setNoteText] = useState('');
 
-  // Section State
-  const [activeSection, setActiveSection] = useState<string>('');
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [orderToPreview, setOrderToPreview] = useState<Order | null>(null);
 
-  // Categories
-  const categories = useMemo(() => ['All', ...Array.from(new Set(products.map(p => p.category)))], [products]);
+  const categoryScrollRef = useRef<HTMLDivElement>(null);
 
-  // Filtered Products
-  const filteredProducts = useMemo(() => {
-    const lowerTerm = searchTerm.toLowerCase();
-    return products.filter(p => {
-      if (searchTerm) {
-          const nameMatch = p.name.toLowerCase().includes(lowerTerm);
-          const categoryMatch = p.category.toLowerCase().includes(lowerTerm);
-          return nameMatch || categoryMatch;
-      }
-      return selectedCategory === 'All' || p.category === selectedCategory;
-    });
-  }, [products, searchTerm, selectedCategory]);
-
-  // Derived Table Data
-  const activeTables = useMemo(() => {
-      return tables.map(t => {
-          const isOccupied = orders.some(o => o.table === t.name && !['paid', 'cancelled', 'merged'].includes(o.status));
-          return { ...t, isOccupied };
-      });
-  }, [tables, orders]);
-
-  // Group tables by section
-  const tablesBySection = useMemo(() => {
-      const groups: Record<string, typeof activeTables> = {};
-      activeTables.forEach(t => {
-          const sectionName = t.section || 'General Area';
-          if (!groups[sectionName]) {
-              groups[sectionName] = [];
-          }
-          groups[sectionName].push(t);
-      });
-      return groups;
-  }, [activeTables]);
-
-  const sortedSections = useMemo(() => Object.keys(tablesBySection).sort(), [tablesBySection]);
-
-  // "My Orders Today"
-  const myOrders = useMemo(() => {
-      const today = new Date().toDateString();
-      const currentUserName = currentUser?.name;
-      return orders.filter(o => {
-          const isMyOrder = o.staffName === currentUserName;
-          const isToday = new Date(o.timestamp).toDateString() === today;
-          return isMyOrder && isToday;
-      }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-  }, [orders, currentUser]);
-
-  // Initialize active section
-  useEffect(() => {
-      if (sortedSections.length > 0 && (!activeSection || !sortedSections.includes(activeSection))) {
-          setActiveSection(sortedSections[0]);
-      }
-  }, [sortedSections, activeSection]);
-
-  // Handle Table Selection
+  // Added handleTableSelect to fix the reference error on line 251
   const handleTableSelect = (table: Table) => {
-    setSelectedTable(table);
-    // Check for active order
-    const existingOrder = orders.find(o => o.table === table.name && !['paid', 'completed', 'cancelled', 'merged'].includes(o.status));
-    
+    const existingOrder = activeOrders.find(o => o.table === table.name);
     if (existingOrder) {
-      const loadedOrder = {
-          ...existingOrder,
-          items: existingOrder.items.map(item => ({ ...item, isPrintPending: false }))
-      };
-      setCurrentOrder(loadedOrder);
+      setCurrentOrder({ ...existingOrder });
     } else {
-      // New Order Stub
       const newOrder: Order = {
         id: `ORD-${Date.now()}`,
         tenantId: systemConfig.tenantId,
@@ -128,531 +68,321 @@ const WaiterPortalView: React.FC<WaiterPortalViewProps> = ({
         items: [],
         status: 'pending',
         timestamp: new Date(),
-        isKitchenOrder: false, // Default to FALSE. Set true only if sent to kitchen.
+        isKitchenOrder: true,
         grandTotal: 0,
         amountPaid: 0,
-        staffName: currentUser?.name,
-        staffRole: currentUser?.role || 'WAITER'
+        staffName: currentUser?.name || 'Waiter',
+        staffRole: currentUser?.role
       };
       setCurrentOrder(newOrder);
     }
+    setSelectedTable(table);
     setActiveTab('MENU');
   };
 
-  const handleResumeOrder = (order: Order) => {
-      const table = tables.find(t => t.name === order.table);
-      if (table) setSelectedTable(table);
-      setCurrentOrder(order);
-      setActiveTab('MENU');
-  };
-
-  const handleItemClick = (product: Product) => {
-      const isSpiritOrWine = product.spiritConfig?.isSpirit || 
-                             product.category === 'Wine' || 
-                             product.category === 'Champagne' || 
-                             product.category === 'Whiskey';
-
-      if (isSpiritOrWine && product.spiritPrices) {
-          setPendingProduct(product);
-          setMeasureModalOpen(true);
-      } else {
-          handleAddToOrder(product);
-      }
-  };
-
-  const handleAddToOrder = (product: Product, variantName?: string, variantPrice?: number) => {
-      if (!currentOrder) return;
-      
-      const price = variantPrice || product.price;
-      const name = variantName ? `${product.name} (${variantName})` : product.name;
-      
-      // Check if item exists in current cart
-      const existingIdx = currentOrder.items.findIndex(i => i.product.id === product.id && i.product.name === name);
-      
-      let newItems = [...currentOrder.items];
-      if (existingIdx >= 0) {
-          // Increment
-          const existingItem = newItems[existingIdx];
-          newItems[existingIdx] = {
-              ...existingItem,
-              quantity: existingItem.quantity + 1,
-              isNew: true // Mark as new/updated
-          };
-      } else {
-          // Add new
-          newItems.push({
-              product: { ...product, name, price },
-              quantity: 1,
-              isNew: true,
-              note: ''
-          });
-      }
-      
-      const newTotal = newItems.reduce((acc, i) => acc + (i.product.price * i.quantity), 0);
-      
-      setCurrentOrder({
-          ...currentOrder,
-          items: newItems,
-          grandTotal: newTotal
+  // Added scrollCategories to fix the reference errors on line 259
+  const scrollCategories = (direction: 'left' | 'right') => {
+    if (categoryScrollRef.current) {
+      const scrollAmount = 250;
+      categoryScrollRef.current.scrollBy({
+        left: direction === 'left' ? -scrollAmount : scrollAmount,
+        behavior: 'smooth'
       });
-      
+    }
+  };
+
+  const mySpecificOrders = useMemo(() => {
+      if (!currentUser) return [];
+      return orders.filter(o => o.staffName === currentUser.name)
+                   .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [orders, currentUser]);
+
+  const unpaidTotal = useMemo(() => {
+      return mySpecificOrders
+        .filter(o => o.status !== 'paid' && o.status !== 'cancelled')
+        .reduce((sum, o) => sum + o.grandTotal, 0);
+  }, [mySpecificOrders]);
+
+  const sections = useMemo(() => {
+    const distinct = Array.from(new Set(tables.map(t => t.section || 'General'))).sort();
+    return distinct.length > 0 ? distinct : ['General'];
+  }, [tables]);
+  
+  const [activeSection, setActiveSection] = useState<string>(sections[0]);
+
+  const currentAllocation = useMemo(() => allocations.find(a => a.sectionName === activeSection), [allocations, activeSection]);
+  const isAllocatedToMe = currentAllocation?.waiterId === currentUser?.id;
+  const isLockedForMe = currentAllocation && currentAllocation.waiterId !== currentUser?.id;
+
+  const visibleTables = useMemo(() => {
+    return tables.filter(t => (t.section || 'General') === activeSection);
+  }, [tables, activeSection]);
+
+  const activeOrders = useMemo(() => {
+    return orders.filter(o => !['paid', 'cancelled', 'merged'].includes(o.status));
+  }, [orders]);
+
+  const categories = useMemo(() => {
+    const cats = new Set<string>();
+    products.forEach(p => cats.add(p.category.toUpperCase()));
+    return ['ALL', ...Array.from(cats).sort()];
+  }, [products]);
+
+  const filteredProducts = useMemo(() => {
+    const lowerTerm = searchTerm.toLowerCase();
+    return products.filter(p => {
+      const catMatch = selectedCategory === 'ALL' || p.category.toUpperCase() === selectedCategory;
+      const searchMatch = p.name.toLowerCase().includes(lowerTerm);
+      return catMatch && searchMatch;
+    });
+  }, [products, searchTerm, selectedCategory]);
+
+  const handleProductClick = (product: Product) => {
+    const isSpirit = product.spiritConfig?.isSpirit || ['Whiskey', 'Vodka', 'Gin', 'Rum', 'Tequila', 'Wine', 'Champagne'].includes(product.category);
+    if (isSpirit && product.spiritPrices) {
+        setPendingSpiritProduct(product);
+        setMeasureModalOpen(true);
+    } else {
+        addToCart(product);
+    }
+  };
+
+  const selectMeasure = (variantName: string, variantPrice: number) => {
+      if (!pendingSpiritProduct) return;
+      setActiveBottlePour({ product: pendingSpiritProduct, variantName, variantPrice });
       setMeasureModalOpen(false);
-      setPendingProduct(null);
+      setBottleSelectModalOpen(true);
   };
 
-  const handleUpdateQuantity = (index: number, delta: number) => {
-      if (!currentOrder) return;
-      const newItems = [...currentOrder.items];
-      const item = newItems[index];
-      const newQty = item.quantity + delta;
+  const confirmBottlePour = (bottleId: string) => {
+    if (!activeBottlePour || !currentOrder) return;
+    const { product, variantName, variantPrice } = activeBottlePour;
+    const bottle = bottles.find(b => b.id === bottleId);
+    if (!bottle) return;
 
-      if (newQty <= 0) {
-          newItems.splice(index, 1);
-      } else {
-          newItems[index] = { ...item, quantity: newQty, isNew: true };
-      }
+    const isWine = ['WINE', 'CHAMPAGNE'].includes(bottle.type);
+    let vol = 0;
+    let totCount = 1;
+    
+    if (variantName.includes('Single') || variantName === 'Glass') {
+        vol = isWine ? 150 : (bottle.measureStandard === 'NEW_25ML' ? 25 : 30);
+        totCount = 1;
+    } else if (variantName.includes('Double')) {
+        vol = bottle.measureStandard === 'NEW_25ML' ? 50 : 60;
+        totCount = 2;
+    } else if (variantName.includes('Bottle')) {
+        vol = bottle.currentVolume;
+        totCount = Math.floor(bottle.totalVolume / (bottle.measureStandard === 'NEW_25ML' ? 25 : 30));
+    }
 
-      const newTotal = newItems.reduce((acc, i) => acc + (i.product.price * i.quantity), 0);
-      setCurrentOrder({ ...currentOrder, items: newItems, grandTotal: newTotal });
+    if (bottle.currentVolume < vol) {
+        alert(`Insufficient volume! Only ${bottle.currentVolume}ml left.`);
+        return;
+    }
+
+    // Deduct from Spirit Inventory
+    const logEntry: SpiritLog = {
+        id: `LOG-WAITER-${Date.now()}`,
+        timestamp: new Date(),
+        quantityMl: vol,
+        tots: totCount,
+        type: isWine ? 'GLASS' : 'DIRECT',
+        staffName: currentUser?.name || 'Waiter'
+    };
+
+    const updatedBottles = bottles.map(b => {
+        if (b.id === bottleId) {
+            const newVol = Math.max(0, b.currentVolume - vol);
+            return { ...b, currentVolume: newVol, status: (newVol < 20 ? 'EMPTY' : 'OPEN') as any, logs: b.logs ? [...b.logs, logEntry] : [logEntry] };
+        }
+        return b;
+    });
+    onUpdateBottles(updatedBottles);
+
+    // Add to Cart
+    const nameWithVariant = `${product.name} (${variantName})`;
+    let newItems = [...currentOrder.items];
+    newItems.push({ product: { ...product, name: nameWithVariant, price: variantPrice }, quantity: 1, isNew: true });
+    const newTotal = newItems.reduce((acc, i) => acc + (i.product.price * i.quantity), 0);
+    setCurrentOrder({ ...currentOrder, items: newItems, grandTotal: newTotal });
+
+    setBottleSelectModalOpen(false);
+    setActiveBottlePour(null);
+    setPendingSpiritProduct(null);
   };
 
-  // --- NOTE / COMMENT LOGIC ---
-  const handleOpenNoteModal = (index: number) => {
-      if (!currentOrder) return;
-      setEditingItemIndex(index);
-      setNoteText(currentOrder.items[index].note || '');
-      setNoteModalOpen(true);
+  const addToCart = (product: Product) => {
+    if (!currentOrder) return;
+    let newItems = [...currentOrder.items];
+    const existingIdx = newItems.findIndex(i => i.product.id === product.id && !i.note && i.product.name === product.name);
+    
+    if (existingIdx >= 0) {
+      newItems[existingIdx] = { ...newItems[existingIdx], quantity: newItems[existingIdx].quantity + 1, isNew: true };
+    } else {
+      newItems.push({ product: { ...product }, quantity: 1, isNew: true });
+    }
+
+    const newTotal = newItems.reduce((acc, i) => acc + (i.product.price * i.quantity), 0);
+    setCurrentOrder({ ...currentOrder, items: newItems, grandTotal: newTotal });
   };
 
-  const handleSaveNote = () => {
-      if (!currentOrder || editingItemIndex === null) return;
-      const newItems = [...currentOrder.items];
-      newItems[editingItemIndex] = {
-          ...newItems[editingItemIndex],
-          note: noteText,
-          isNew: true // Mark as changed so kitchen sees the update
-      };
-      setCurrentOrder({ ...currentOrder, items: newItems });
-      setNoteModalOpen(false);
-      setEditingItemIndex(null);
-      setNoteText('');
+  const updateQty = (idx: number, delta: number) => {
+    if (!currentOrder) return;
+    if (delta < 0) {
+        setAccessError("WAITER RESTRICTION: You cannot reduce quantities. Contact Cashier to modify items.");
+        setTimeout(() => setAccessError(null), 4000);
+        return;
+    }
+    let newItems = [...currentOrder.items];
+    const newQty = newItems[idx].quantity + delta;
+    newItems[idx] = { ...newItems[idx], quantity: newQty, isNew: true };
+    const newTotal = newItems.reduce((acc, i) => acc + (i.product.price * i.quantity), 0);
+    setCurrentOrder({ ...currentOrder, items: newItems, grandTotal: newTotal });
   };
 
-  const handleQuickTag = (tag: string) => {
-      setNoteText(prev => prev ? `${prev}, ${tag}` : tag);
+  const handleSendOrder = (type: 'KITCHEN' | 'BARMAN') => {
+    if (!currentOrder || currentOrder.items.length === 0) return;
+    const orderToSubmit = { ...currentOrder, isKitchenOrder: type === 'KITCHEN' };
+    const exists = orders.find(o => o.id === currentOrder.id);
+    if (exists) onUpdateOrder(orderToSubmit);
+    else onPlaceOrder(orderToSubmit);
+    printReceipt(systemConfig, orderToSubmit, type === 'KITCHEN' ? 'KITCHEN' : 'BAR', null, currentUser?.name || 'Waiter');
+    setSelectedTable(null);
+    setCurrentOrder(null);
+    setActiveTab('TABLES');
   };
 
-  const handleSendOrder = (destination: 'KITCHEN' | 'BAR') => {
-      if (!currentOrder) return;
-
-      const isKitchen = destination === 'KITCHEN' ? true : currentOrder.isKitchenOrder;
-
-      const orderToSave: Order = {
-          ...currentOrder,
-          status: 'pending',
-          isKitchenOrder: isKitchen,
-          timestamp: new Date()
-      };
-
-      if (orders.find(o => o.id === orderToSave.id)) {
-          onUpdateOrder(orderToSave);
-      } else {
-          onPlaceOrder(orderToSave);
-      }
-
-      // Reset View
-      setSelectedTable(null);
-      setCurrentOrder(null);
-      setActiveTab('TABLES');
-  };
+  const isWine = pendingSpiritProduct && ['WINE', 'CHAMPAGNE', 'RED WINE', 'WHITE WINE'].includes(pendingSpiritProduct.category.toUpperCase());
 
   return (
-    <div className="h-full flex flex-col bg-[#f0f2f5] overflow-hidden font-sans">
-      
-      {/* HEADER */}
-      <div className="h-16 bg-[#1e293b] flex items-center justify-between px-4 shrink-0 shadow-md z-30 text-white">
-          <div className="flex items-center gap-4">
-              <button 
-                  onClick={onLogout}
-                  className="p-2 hover:bg-white/10 rounded-full transition-colors"
-                  title="Logout"
-              >
-                  <LogOut className="w-5 h-5 text-red-400" />
-              </button>
-              
-              <div className="h-8 w-px bg-white/20"></div>
-
-              <button 
-                  onClick={() => setActiveTab('TABLES')}
-                  className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all flex items-center gap-2 ${activeTab === 'TABLES' ? 'bg-white/20 text-white' : 'text-white/60 hover:text-white'}`}
-              >
-                  <LayoutGrid className="w-4 h-4" /> Tables
-              </button>
-              <button 
-                  onClick={() => setActiveTab('MY_ORDERS')}
-                  className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all flex items-center gap-2 ${activeTab === 'MY_ORDERS' ? 'bg-white/20 text-white' : 'text-white/60 hover:text-white'}`}
-              >
-                  <Receipt className="w-4 h-4" /> My Orders
-              </button>
+    <div className="h-full flex flex-col bg-[#f4f7f6] overflow-hidden font-sans">
+      <div className="h-16 bg-[#34495e] flex items-center justify-between px-6 shrink-0 shadow-lg z-30 text-white">
+        <div className="flex items-center gap-4">
+          <button onClick={onLogout} className="p-2 hover:bg-white/10 rounded-xl transition-all"><ArrowLeft className="w-6 h-6" /></button>
+          <div className="h-8 w-px bg-white/10 mx-2"></div>
+          <div><h1 className="text-xl font-black uppercase tracking-tighter">Waiter Portal</h1><p className="text-[10px] font-bold text-white/50 uppercase tracking-widest leading-none mt-0.5">Terminal Active</p></div>
+        </div>
+        <div className="flex items-center gap-6">
+          <div className="flex bg-[#2c3e50] p-1 rounded-xl shadow-inner border border-white/5">
+             <button onClick={() => setActiveTab('TABLES')} className={`px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'TABLES' || activeTab === 'MENU' ? 'bg-white text-[#34495e] shadow-md' : 'text-white/60 hover:text-white'}`}>TABLES</button>
+             <button onClick={() => { setActiveTab('MY_ORDERS'); setSelectedTable(null); }} className={`px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'MY_ORDERS' ? 'bg-white text-[#34495e] shadow-md' : 'text-white/60 hover:text-white'}`}>MY SHIFT HISTORY</button>
           </div>
-
-          <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 bg-white/10 px-3 py-1.5 rounded-full border border-white/10">
-                  <User className="w-3 h-3 text-green-400" />
-                  <span className="text-xs font-bold">{currentUser?.name || 'Waiter'}</span>
-              </div>
+          <div className="flex items-center gap-3 pl-6 border-l border-white/10">
+             <div className="text-right"><p className="text-xs font-black uppercase leading-tight">{currentUser?.name}</p><p className="text-[9px] font-bold text-emerald-400 uppercase tracking-widest">Online</p></div>
+             <div className="w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center border-2 border-white/20 shadow-lg font-black text-white">{currentUser?.name?.charAt(0)}</div>
           </div>
+        </div>
       </div>
 
-      {/* CONTENT */}
-      <div className="flex-1 relative overflow-hidden flex flex-col">
-          
-          {/* VIEW: TABLES */}
+      <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden bg-white">
           {activeTab === 'TABLES' && (
-              <div className="flex-1 flex flex-col p-6 overflow-hidden">
-                  <div className="mb-6 flex gap-2 overflow-x-auto no-scrollbar pb-2">
-                      {sortedSections.map(sec => (
-                          <button
-                              key={sec}
-                              onClick={() => setActiveSection(sec)}
-                              className={`px-6 py-3 rounded-2xl text-sm font-black uppercase tracking-wider shadow-sm transition-all whitespace-nowrap ${
-                                  activeSection === sec 
-                                      ? 'bg-[#3b82f6] text-white shadow-blue-200' 
-                                      : 'bg-white text-gray-500 hover:bg-gray-50'
-                              }`}
-                          >
-                              {sec}
+            <div className="flex-1 flex flex-col p-8 animate-in fade-in duration-300 overflow-y-auto custom-scrollbar">
+               {accessError && <div className="mb-4 p-4 bg-red-600 text-white rounded-2xl shadow-xl flex items-center gap-3 animate-bounce"><AlertCircle className="w-6 h-6" /><span className="font-black text-sm uppercase tracking-tight">{accessError}</span></div>}
+               <div className="flex gap-2 mb-8 overflow-x-auto no-scrollbar pb-2">{sections.map(sec => { const alloc = allocations.find(a => a.sectionName === sec); const isMine = alloc?.waiterId === currentUser?.id; const isTheirs = alloc && !isMine; return (<button key={sec} onClick={() => setActiveSection(sec)} className={`px-8 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all border-2 flex items-center gap-3 ${activeSection === sec ? (isTheirs ? 'bg-red-50 border-red-200 text-red-600' : 'bg-blue-600 border-blue-600 text-white shadow-xl') : 'bg-white border-gray-100 text-gray-400 hover:border-gray-200'}`}>{isMine && <ShieldCheck className="w-4 h-4" />}{isTheirs && <Lock className="w-4 h-4" />}{sec}</button>);})}</div>
+               <div className="bg-slate-50 p-6 rounded-3xl mb-8 flex justify-between items-center border border-slate-100 shadow-inner">
+                  <div className="flex items-center gap-4"><div className={`p-3 rounded-2xl ${isAllocatedToMe ? 'bg-indigo-600 text-white' : isLockedForMe ? 'bg-red-600 text-white' : 'bg-white text-slate-400'}`}>{isAllocatedToMe ? <ShieldCheck className="w-6 h-6" /> : isLockedForMe ? <Lock className="w-6 h-6" /> : <MapPin className="w-6 h-6" />}</div><div><h2 className="text-xl font-black uppercase tracking-tighter text-slate-800">{activeSection}</h2><p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{isAllocatedToMe ? "My Current Allocation" : isLockedForMe ? `Assigned to ${currentAllocation.waiterName}` : "Open Section - Unallocated"}</p></div></div>
+                  {!currentAllocation && <button onClick={() => onClaimSection(activeSection)} className="px-6 py-3 bg-white border border-slate-200 text-indigo-600 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition-all shadow-sm active:scale-95">Claim Section</button>}
+               </div>
+               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-8">{visibleTables.map(t => { const isOccupied = activeOrders.some(o => o.table === t.name); return (<button key={t.id} onClick={() => handleTableSelect(t)} disabled={isLockedForMe} className={`aspect-square rounded-[2rem] border-2 flex flex-col items-center justify-center relative transition-all group hover:scale-[1.02] ${isLockedForMe ? 'opacity-40 grayscale bg-slate-100 border-transparent cursor-not-allowed' : isOccupied ? 'bg-red-50 border-red-200 shadow-lg' : 'bg-white border-gray-100 hover:border-blue-400 shadow-sm'}`}>{isLockedForMe && <Lock className="w-6 h-6 text-slate-400 mb-2" />}{!isLockedForMe && isOccupied && <div className="absolute top-6 right-6 w-3 h-3 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.5)]"></div>}<span className={`text-4xl font-black tracking-tighter ${isOccupied ? 'text-red-800' : 'text-slate-800'}`}>{t.name}</span><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">{t.seats} Seats</span></button>);})}</div>
+            </div>
+          )}
+
+          {activeTab === 'MENU' && (
+            <div className="flex-1 flex flex-col overflow-hidden">
+               <div className="p-6 border-b border-gray-100 bg-white shadow-sm z-10 shrink-0">
+                  <div className="relative mb-6"><Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" /><input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search menu..." className="w-full pl-12 pr-6 py-4 bg-gray-50 border-2 border-transparent rounded-2xl focus:bg-white focus:border-blue-600 outline-none font-bold text-lg transition-all" /></div>
+                  <div className="relative flex items-center group/cat"><button onClick={() => scrollCategories('left')} className="absolute left-0 z-20 p-2 bg-white/90 rounded-full shadow-lg border border-gray-100 text-gray-400 hover:text-blue-600 transition-all opacity-0 group-hover/cat:opacity-100 -translate-x-2"><ChevronLeft className="w-5 h-5" /></button><div className="absolute left-0 top-0 bottom-0 w-8 bg-gradient-to-r from-white to-transparent z-10 pointer-events-none"></div><div ref={categoryScrollRef} className="flex gap-2 overflow-x-auto no-scrollbar scroll-smooth px-8 py-1">{categories.map(cat => (<button key={cat} onClick={() => setSelectedCategory(cat)} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${selectedCategory === cat ? 'bg-blue-600 text-white shadow-lg' : 'bg-white border border-gray-200 text-gray-500 hover:bg-gray-100'}`}>{cat}</button>))}</div><div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-white to-transparent z-10 pointer-events-none"></div><button onClick={() => scrollCategories('right')} className="absolute right-0 z-20 p-2 bg-white/90 rounded-full shadow-lg border border-gray-100 text-gray-400 hover:text-blue-600 transition-all opacity-0 group-hover/cat:opacity-100 translate-x-2"><ChevronRight className="w-5 h-5" /></button></div>
+               </div>
+               <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50 custom-scrollbar">
+                  <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">{filteredProducts.map(p => (<div key={p.id} onClick={() => handleProductClick(p)} className="bg-white rounded-3xl border border-gray-100 shadow-sm hover:shadow-xl transition-all cursor-pointer group flex flex-col overflow-hidden h-64"><div className="h-32 bg-gray-100 relative overflow-hidden shrink-0"><img src={p.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400'} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt={p.name} /></div><div className="p-4 flex-1 flex flex-col justify-between"><h3 className="font-bold text-slate-800 text-sm leading-tight line-clamp-2">{p.name}</h3><p className="text-xl font-black text-blue-600 tracking-tight mt-2">{p.price.toLocaleString()}</p></div></div>))}</div>
+               </div>
+            </div>
+          )}
+
+          {activeTab === 'MY_ORDERS' && (
+            <div className="flex-1 flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 duration-500">
+               <div className="p-8 border-b border-gray-100 bg-white flex justify-between items-center shrink-0"><div><h2 className="text-3xl font-black uppercase tracking-tight text-slate-900 flex items-center gap-3"><ClipboardList className="w-8 h-8 text-blue-600" /> Personal Transaction Registry</h2><p className="text-slate-500 font-bold text-xs uppercase tracking-widest mt-1">Shift performance & table clearance tracking</p></div><div className="text-right"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Awaiting Settle</p><p className="text-3xl font-black text-blue-600 tabular-nums">{systemConfig.currency} {unpaidTotal.toLocaleString()}</p></div></div>
+               <div className="flex-1 overflow-y-auto p-8 custom-scrollbar bg-slate-50/50"><div className="max-w-6xl mx-auto space-y-4">{mySpecificOrders.length === 0 ? (<div className="py-20 text-center text-slate-300 opacity-40 uppercase font-black"><History className="w-20 h-20 mx-auto mb-4" />No orders recorded in your name this shift.</div>) : (mySpecificOrders.map(o => { const isPaid = o.status === 'paid'; const isCancelled = o.status === 'cancelled'; return (<div key={o.id} className={`bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100 flex items-center justify-between hover:shadow-md transition-all group ${isPaid ? 'opacity-70 grayscale-[0.5]' : ''}`}><div className="flex items-center gap-6"><div className={`w-16 h-16 rounded-3xl flex flex-col items-center justify-center font-black text-2xl border-2 ${isPaid ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : isCancelled ? 'bg-red-50 border-red-100 text-red-600' : 'bg-blue-50 border-blue-100 text-blue-600'}`}>{o.table}</div><div><div className="flex items-center gap-3"><h3 className="font-black text-lg text-slate-800 uppercase tracking-tight">Order #{o.id.slice(-6).toUpperCase()}</h3><span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${isPaid ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : isCancelled ? 'bg-red-50 text-red-600 border-red-100' : 'bg-orange-50 text-orange-600 border border-orange-100 animate-pulse'}`}>{o.status}</span></div><div className="flex items-center gap-4 mt-1 text-xs font-bold text-slate-400 uppercase tracking-wider"><span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {new Date(o.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span><span className="flex items-center gap-1"><Utensils className="w-3 h-3" /> {o.items.length} items</span></div></div></div><div className="flex items-center gap-8"><div className="text-right"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Bill Total</p><p className={`text-xl font-black tabular-nums ${isPaid ? 'text-slate-400' : 'text-slate-900'}`}>{systemConfig.currency} {o.grandTotal.toLocaleString()}</p></div><div className="flex gap-2">{!isPaid && !isCancelled && (<button onClick={() => { setSelectedTable(tables.find(t => t.name === o.table) || null); setCurrentOrder({...o}); setActiveTab('MENU'); }} className="p-3 bg-blue-50 text-blue-600 rounded-2xl hover:bg-blue-600 hover:text-white transition-all shadow-sm active:scale-90" title="Modify Order"><Plus className="w-5 h-5" /></button>)}<button onClick={() => { setOrderToPreview(o); setPreviewOpen(true); }} className="p-3 bg-slate-50 text-slate-400 rounded-2xl hover:bg-slate-900 hover:text-white transition-all shadow-sm active:scale-90" title="View Receipt"><FileText className="w-5 h-5" /></button></div></div></div>);}))}</div></div>
+            </div>
+          )}
+        </div>
+
+        {activeTab !== 'MY_ORDERS' && (
+            <div className="w-[420px] bg-white border-l border-gray-200 flex flex-col shadow-2xl z-20 shrink-0">
+            {!selectedTable || !currentOrder ? (
+                <div className="flex-1 flex flex-col items-center justify-center text-slate-300 p-10 text-center opacity-40">
+                <Utensils className="w-20 h-20 mb-6" />
+                <h3 className="text-xl font-black uppercase tracking-widest">Select Table</h3>
+                <p className="text-xs font-bold mt-2">Choose an area on the left to start an order session.</p>
+                </div>
+            ) : (
+                <>
+                <div className="p-8 border-b border-gray-100 flex justify-between items-start shrink-0"><div><h2 className="text-5xl font-black text-slate-900 tracking-tighter uppercase">{selectedTable.name}</h2><p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mt-2">Current Order</p></div><button onClick={() => { setSelectedTable(null); setCurrentOrder(null); setActiveTab('TABLES'); }} className="p-2 hover:bg-slate-100 rounded-full text-slate-400 transition-colors"><X /></button></div>
+                <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar bg-white">{currentOrder.items.length === 0 ? (<div className="h-full flex flex-col items-center justify-center text-slate-300 opacity-60"><ShoppingCart className="w-16 h-16 mb-4" /><p className="text-xs font-black uppercase tracking-widest">Awaiting Items</p></div>) : (currentOrder.items.map((item, idx) => (<div key={idx} className="flex gap-4 items-start animate-in slide-in-from-right-4 duration-300"><div className="flex flex-col items-center bg-[#f1f5f9] rounded-2xl p-1 shrink-0 border border-slate-200"><button onClick={() => updateQty(idx, 1)} className="p-2 text-blue-600 hover:bg-white rounded-xl transition-all active:scale-90"><Plus className="w-5 h-5" /></button><span className="font-black text-lg py-1 px-2 text-slate-900">{item.quantity}</span><button onClick={() => updateQty(idx, -1)} className="p-2 text-red-500 hover:bg-white rounded-xl transition-all active:scale-90 opacity-40 grayscale cursor-not-allowed" title="Contact Cashier to reduce quantity"><Minus className="w-5 h-5" /></button></div><div className="flex-1 min-w-0 pt-1"><div className="flex justify-between items-start"><p className="font-bold text-slate-800 text-base leading-tight pr-4">{item.product.name}</p><p className="font-black text-slate-900 tabular-nums">{(item.quantity * item.product.price).toLocaleString()}</p></div><button onClick={() => { setEditingItemIndex(idx); setNoteText(item.note || ''); setNoteModalOpen(true); }} className="text-[10px] font-black text-blue-600 uppercase tracking-widest hover:bg-blue-50 px-2 py-1 rounded transition-colors flex items-center gap-1.5 mt-2"><Edit3 className="w-3.5 h-3.5" /> {item.note ? 'Edit Note' : 'Add Note'}</button>{item.note && <p className="text-[11px] text-red-600 font-bold italic mt-2 leading-tight bg-red-50/50 p-2 rounded-xl border border-red-100 flex items-start gap-1.5"><span className="font-black not-italic">@</span> {item.note}</p>}</div></div>)))}</div>
+                <div className="p-8 border-t border-gray-100 bg-[#f8fafc] shrink-0"><div className="flex justify-between items-center mb-8"><span className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">Total Amount</span><div className="text-right"><p className="text-xs font-black text-slate-400 uppercase leading-none mb-1">UGX</p><p className="text-5xl font-black text-slate-900 tracking-tighter tabular-nums">{currentOrder.grandTotal.toLocaleString()}</p></div></div><div className="grid grid-cols-2 gap-4"><button onClick={() => handleSendOrder('KITCHEN')} disabled={currentOrder.items.length === 0} className="flex flex-col items-center justify-center py-6 bg-[#f39c12] hover:bg-[#e67e22] text-white rounded-[2rem] shadow-xl transition-all active:scale-95 disabled:opacity-50 disabled:grayscale group"><ChefHat className="w-8 h-8 mb-2 group-hover:-rotate-12 transition-transform" /><span className="text-[11px] font-black uppercase tracking-widest">To Kitchen</span></button><button onClick={() => handleSendOrder('BARMAN')} disabled={currentOrder.items.length === 0} className="flex flex-col items-center justify-center py-6 bg-[#9b59b6] hover:bg-[#8e44ad] text-white rounded-[2rem] shadow-xl transition-all active:scale-95 disabled:opacity-50 disabled:grayscale group"><Martini className="w-8 h-8 mb-2 group-hover:rotate-12 transition-transform" /><span className="text-[11px] font-black uppercase tracking-widest">To Barman</span></button></div></div>
+                </>
+            )}
+            </div>
+        )}
+      </div>
+
+      {/* Spirit Measure Selection */}
+      {measureModalOpen && pendingSpiritProduct && (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+              <div className="bg-white w-full max-sm rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95">
+                  <div className="text-center mb-6"><h3 className="text-xl font-black text-gray-800">{pendingSpiritProduct.name}</h3><p className="text-sm text-gray-500 font-medium uppercase tracking-widest mt-1">Select Measure</p></div>
+                  <div className="grid grid-cols-1 gap-3">
+                      {pendingSpiritProduct.spiritPrices?.single && <button onClick={() => selectMeasure(isWine ? "Glass" : "Single Tot", pendingSpiritProduct.spiritPrices?.single!)} className="flex justify-between items-center p-4 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl transition-all group"><span className="font-bold text-gray-700">{isWine ? "Glass" : "Single Tot"}</span><span className="font-black text-blue-700">{systemConfig.currency} {pendingSpiritProduct.spiritPrices?.single.toLocaleString()}</span></button>}
+                      {pendingSpiritProduct.spiritPrices?.double && <button onClick={() => selectMeasure("Double Tot", pendingSpiritProduct.spiritPrices?.double!)} className="flex justify-between items-center p-4 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-xl transition-all group"><span className="font-bold text-gray-700">Double Tot</span><span className="font-black text-purple-700">{systemConfig.currency} {pendingSpiritProduct.spiritPrices?.double.toLocaleString()}</span></button>}
+                      <button onClick={() => selectMeasure("Full Bottle", pendingSpiritProduct.spiritPrices?.full || pendingSpiritProduct.price)} className="flex justify-between items-center p-4 bg-green-50 hover:bg-green-100 border-green-200 rounded-xl transition-all group"><span className="font-bold text-gray-700">Full Bottle</span><span className="font-black text-green-700">{systemConfig.currency} {(pendingSpiritProduct.spiritPrices?.full || pendingSpiritProduct.price).toLocaleString()}</span></button>
+                  </div>
+                  <button onClick={() => { setMeasureModalOpen(false); setPendingSpiritProduct(null); }} className="w-full mt-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl font-bold uppercase text-xs">Cancel</button>
+              </div>
+          </div>
+      )}
+
+      {/* Spirit Bottle Selection */}
+      {bottleSelectModalOpen && activeBottlePour && (
+          <div className="fixed inset-0 z-[160] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+              <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl p-8 animate-in zoom-in-95">
+                  <h3 className="text-xl font-black uppercase text-slate-900 mb-2">Bottle Match</h3>
+                  <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mb-6">Pour from open stock for {activeBottlePour.product.name}</p>
+                  
+                  <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-2 mb-6">
+                      {bottles.filter(b => b.status === 'OPEN' && b.name.toLowerCase().includes(activeBottlePour.product.name.toLowerCase())).map(bottle => (
+                          <button key={bottle.id} onClick={() => confirmBottlePour(bottle.id)} className="w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-blue-50 border border-gray-100 rounded-2xl transition-all">
+                              <span className="font-bold text-gray-800 text-sm">{bottle.name}</span>
+                              <span className="font-black text-blue-600 text-xs">{bottle.currentVolume}ml Left</span>
                           </button>
                       ))}
-                  </div>
-
-                  <div className="flex-1 overflow-y-auto custom-scrollbar">
-                      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 pb-20">
-                          {activeTables.filter(t => (t.section || 'General Area') === activeSection).map(table => (
-                              <button
-                                  key={table.id}
-                                  onClick={() => handleTableSelect(table)}
-                                  className={`relative aspect-square rounded-[2rem] flex flex-col items-center justify-center transition-all hover:scale-105 shadow-sm border-4 ${
-                                      table.isOccupied 
-                                          ? 'bg-red-50 border-red-200 text-red-600' 
-                                          : 'bg-white border-gray-100 text-gray-600 hover:border-blue-200'
-                                  }`}
-                              >
-                                  <span className="text-3xl font-black">{table.name}</span>
-                                  <span className="text-[10px] font-bold uppercase mt-1 opacity-60">{table.seats} Seats</span>
-                                  {table.isOccupied && (
-                                      <div className="absolute top-3 right-3 w-3 h-3 bg-red-500 rounded-full animate-pulse shadow-lg shadow-red-200"></div>
-                                  )}
-                              </button>
-                          ))}
-                      </div>
-                  </div>
-              </div>
-          )}
-
-          {/* VIEW: MY ORDERS */}
-          {activeTab === 'MY_ORDERS' && (
-              <div className="flex-1 p-6 overflow-y-auto custom-scrollbar">
-                  <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tight mb-6">My Active Orders</h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                      {myOrders.length === 0 ? (
-                          <div className="col-span-full py-20 text-center text-gray-400 font-bold uppercase">No active orders found today.</div>
-                      ) : (
-                          myOrders.map(order => (
-                              <div key={order.id} className="bg-white rounded-[2rem] p-6 shadow-sm border border-gray-200 hover:shadow-md transition-all">
-                                  <div className="flex justify-between items-start mb-4">
-                                      <div>
-                                          <h3 className="text-xl font-black text-gray-800">{order.table}</h3>
-                                          <p className="text-xs font-bold text-gray-400">#{order.id.slice(-4)}</p>
-                                      </div>
-                                      <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase ${
-                                          order.status === 'ready' ? 'bg-green-100 text-green-700' : 
-                                          order.status === 'preparing' ? 'bg-blue-100 text-blue-700' : 
-                                          'bg-gray-100 text-gray-600'
-                                      }`}>
-                                          {order.status}
-                                      </span>
-                                  </div>
-                                  <div className="space-y-1 mb-4">
-                                      {order.items.slice(0, 3).map((item, i) => (
-                                          <div key={i} className="flex justify-between text-sm text-gray-600">
-                                              <span>{item.quantity}x {item.product.name}</span>
-                                          </div>
-                                      ))}
-                                      {order.items.length > 3 && <p className="text-xs text-gray-400 italic">...and {order.items.length - 3} more</p>}
-                                  </div>
-                                  <div className="flex justify-between items-center border-t border-gray-100 pt-4">
-                                      <span className="font-black text-lg text-gray-900">{systemConfig.currency} {order.grandTotal.toLocaleString()}</span>
-                                      <button 
-                                          onClick={() => handleResumeOrder(order)}
-                                          className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold uppercase hover:bg-blue-700 transition-colors"
-                                      >
-                                          Modify
-                                      </button>
-                                  </div>
-                              </div>
-                          ))
+                      {bottles.filter(b => b.status === 'OPEN' && b.name.toLowerCase().includes(activeBottlePour.product.name.toLowerCase())).length === 0 && (
+                          <div className="text-center p-8 bg-red-50 rounded-2xl border border-red-100">
+                             <AlertTriangle className="w-10 h-10 text-red-500 mx-auto mb-2" />
+                             <p className="text-xs font-bold text-red-800 uppercase">No open bottles found!</p>
+                             <p className="text-[10px] text-red-600 mt-1">Please open a new bottle in Spirits Inventory first.</p>
+                          </div>
                       )}
                   </div>
+                  <button onClick={() => { setBottleSelectModalOpen(false); setActiveBottlePour(null); setPendingSpiritProduct(null); }} className="w-full py-4 text-gray-400 font-bold uppercase text-xs">Cancel</button>
               </div>
-          )}
+          </div>
+      )}
 
-          {/* VIEW: MENU & CART (SPLIT SCREEN) */}
-          {activeTab === 'MENU' && currentOrder && (
-              <div className="flex-1 flex overflow-hidden">
-                  
-                  {/* LEFT: MENU */}
-                  <div className="flex-1 flex flex-col bg-white border-r border-gray-200 min-w-0">
-                      {/* Search & Cats */}
-                      <div className="p-4 border-b border-gray-200 space-y-4">
-                          <div className="relative">
-                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                              <input 
-                                  autoFocus
-                                  value={searchTerm}
-                                  onChange={e => setSearchTerm(e.target.value)}
-                                  placeholder="Search menu..." 
-                                  className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none"
-                              />
-                          </div>
-                          <div className="flex gap-2 overflow-x-auto no-scrollbar">
-                              {categories.map(cat => (
-                                  <button
-                                      key={cat}
-                                      onClick={() => setSelectedCategory(cat)}
-                                      className={`px-4 py-2 rounded-lg text-xs font-black uppercase whitespace-nowrap transition-all border ${
-                                          selectedCategory === cat 
-                                              ? 'bg-blue-600 text-white border-blue-600' 
-                                              : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'
-                                      }`}
-                                  >
-                                      {cat}
-                                  </button>
-                              ))}
-                          </div>
-                      </div>
-
-                      {/* Products Grid */}
-                      <div className="flex-1 overflow-y-auto custom-scrollbar p-4 bg-gray-50/50">
-                          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 pb-20">
-                              {filteredProducts.map(product => (
-                                  <button 
-                                      key={product.id} 
-                                      onClick={() => handleItemClick(product)}
-                                      className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 flex flex-col text-left hover:shadow-md transition-all group h-40"
-                                  >
-                                      <div className="flex-1 w-full bg-gray-100 rounded-xl mb-3 overflow-hidden relative">
-                                          {product.image ? (
-                                              <img src={product.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
-                                          ) : (
-                                              <div className="w-full h-full flex items-center justify-center text-gray-300"><Utensils className="w-6 h-6" /></div>
-                                          )}
-                                          <div className="absolute top-1 right-1 bg-white/90 backdrop-blur px-2 py-0.5 rounded text-[9px] font-bold text-gray-600 uppercase shadow-sm">
-                                              {product.stock > 0 ? product.stock : '-'}
-                                          </div>
-                                      </div>
-                                      <div>
-                                          <h4 className="font-bold text-gray-800 text-xs leading-tight line-clamp-2 mb-1">{product.name}</h4>
-                                          <span className="font-black text-blue-600 text-sm">{product.price.toLocaleString()}</span>
-                                      </div>
-                                  </button>
-                              ))}
-                          </div>
-                      </div>
-                  </div>
-
-                  {/* RIGHT: CART */}
-                  <div className="w-[350px] lg:w-[400px] bg-white flex flex-col shadow-2xl z-20 border-l border-gray-200 shrink-0">
-                      
-                      {/* Cart Header */}
-                      <div className="p-6 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
-                          <div>
-                              <h2 className="text-2xl font-black uppercase text-gray-800 tracking-tighter">{currentOrder.table}</h2>
-                              <p className="text-xs font-bold text-gray-400 uppercase">Current Order</p>
-                          </div>
-                          <button onClick={() => { setCurrentOrder(null); setActiveTab('TABLES'); }} className="p-2 hover:bg-gray-200 rounded-full text-gray-500">
-                              <X className="w-5 h-5" />
-                          </button>
-                      </div>
-
-                      {/* Items */}
-                      <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3">
-                          {currentOrder.items.map((item, idx) => (
-                              <div key={idx} className="flex items-start gap-3 p-3 bg-white border border-gray-100 rounded-xl hover:border-blue-100 transition-colors shadow-sm">
-                                  <div className="flex flex-col items-center gap-1 bg-gray-50 p-1 rounded-lg">
-                                      <button onClick={() => handleUpdateQuantity(idx, 1)} className="p-1 hover:bg-green-100 text-green-600 rounded"><Plus className="w-3 h-3" /></button>
-                                      <span className="text-sm font-black text-gray-800">{item.quantity}</span>
-                                      <button onClick={() => handleUpdateQuantity(idx, -1)} className="p-1 hover:bg-red-100 text-red-600 rounded"><Minus className="w-3 h-3" /></button>
-                                  </div>
-                                  <div className="flex-1 pt-1">
-                                      <div className="flex justify-between items-start">
-                                          <div>
-                                              <h4 className="font-bold text-gray-800 text-sm leading-tight">{item.product.name}</h4>
-                                              <div className="flex items-center gap-2 mt-1">
-                                                  <button 
-                                                    onClick={() => handleOpenNoteModal(idx)}
-                                                    className="text-[10px] text-blue-500 hover:bg-blue-50 px-1.5 py-0.5 rounded flex items-center gap-1 transition-colors"
-                                                  >
-                                                      <Edit3 className="w-3 h-3" /> {item.note ? 'Edit Note' : 'Add Note'}
-                                                  </button>
-                                                  {item.note && (
-                                                      <span className="text-[10px] text-red-500 font-bold italic truncate max-w-[120px]">
-                                                          * {item.note}
-                                                      </span>
-                                                  )}
-                                              </div>
-                                          </div>
-                                          <span className="font-bold text-gray-900 text-sm">{(item.quantity * item.product.price).toLocaleString()}</span>
-                                      </div>
-                                      <p className="text-[10px] text-gray-400 font-medium">@ {item.product.price.toLocaleString()}</p>
-                                  </div>
-                              </div>
-                          ))}
-                          {currentOrder.items.length === 0 && (
-                              <div className="h-full flex flex-col items-center justify-center text-gray-300">
-                                  <ShoppingCart className="w-12 h-12 mb-3 opacity-20" />
-                                  <p className="font-black text-xs uppercase tracking-widest">Cart Empty</p>
-                              </div>
-                          )}
-                      </div>
-
-                      {/* Footer Actions */}
-                      <div className="p-6 bg-white border-t border-gray-200 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
-                          <div className="flex justify-between items-center mb-6">
-                              <span className="text-xs font-black text-gray-400 uppercase tracking-widest">Total Amount</span>
-                              <span className="text-3xl font-black text-gray-900 tracking-tight">
-                                  <span className="text-lg text-gray-400 mr-1 font-medium">{systemConfig.currency}</span>
-                                  {currentOrder.grandTotal.toLocaleString()}
-                              </span>
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-3">
-                              {/* TO KITCHEN BUTTON */}
-                              <button 
-                                  onClick={() => handleSendOrder('KITCHEN')}
-                                  disabled={currentOrder.items.length === 0}
-                                  className="py-4 bg-orange-600 hover:bg-orange-700 text-white rounded-2xl font-black text-xs uppercase shadow-lg shadow-orange-200 flex flex-col items-center justify-center gap-1 transition-all active:scale-95 disabled:opacity-50"
-                              >
-                                  <ChefHat className="w-5 h-5" /> To Kitchen
-                              </button>
-
-                              {/* TO BARMAN BUTTON */}
-                              <button 
-                                  onClick={() => handleSendOrder('BAR')}
-                                  disabled={currentOrder.items.length === 0}
-                                  className="py-4 bg-purple-600 hover:bg-purple-700 text-white rounded-2xl font-black text-xs uppercase shadow-lg shadow-purple-200 flex flex-col items-center justify-center gap-1 transition-all active:scale-95 disabled:opacity-50"
-                              >
-                                  <Beer className="w-5 h-5" /> To Barman
-                              </button>
-                          </div>
-                      </div>
-                  </div>
-              </div>
-          )}
-
-      </div>
-
-      {/* NOTE / COMMENT MODAL */}
       {noteModalOpen && editingItemIndex !== null && (
-          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-              <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95">
-                  <div className="flex justify-between items-start mb-4">
-                      <div>
-                          <h3 className="text-xl font-black text-gray-800">Add Item Note</h3>
-                          <p className="text-sm text-gray-500 font-bold">
-                              {currentOrder?.items[editingItemIndex].product.name}
-                          </p>
-                      </div>
-                      <button onClick={() => setNoteModalOpen(false)} className="p-1 hover:bg-gray-100 rounded-full"><X className="w-5 h-5 text-gray-400" /></button>
-                  </div>
-
-                  <div className="space-y-4">
-                      <textarea 
-                          autoFocus
-                          value={noteText}
-                          onChange={(e) => setNoteText(e.target.value)}
-                          className="w-full h-24 p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 font-bold text-sm text-gray-800 resize-none placeholder:text-gray-400"
-                          placeholder="Type instructions here (e.g. No Sugar, Extra Spicy)..."
-                      />
-                      
-                      <div>
-                          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Quick Tags</p>
-                          <div className="flex flex-wrap gap-2">
-                              {COMMON_NOTES.map(tag => (
-                                  <button
-                                      key={tag}
-                                      onClick={() => handleQuickTag(tag)}
-                                      className="px-3 py-1.5 bg-gray-100 hover:bg-blue-50 hover:text-blue-600 rounded-lg text-xs font-bold text-gray-600 transition-colors border border-gray-200"
-                                  >
-                                      {tag}
-                                  </button>
-                              ))}
-                          </div>
-                      </div>
-
-                      <div className="flex gap-2 pt-2">
-                          <button 
-                              onClick={() => setNoteText('')}
-                              className="px-4 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold text-xs uppercase hover:bg-gray-200 transition-colors"
-                          >
-                              Clear
-                          </button>
-                          <button 
-                              onClick={handleSaveNote}
-                              className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-black text-xs uppercase shadow-lg shadow-blue-200 hover:bg-blue-700 transition-colors"
-                          >
-                              Save Note
-                          </button>
-                      </div>
-                  </div>
-              </div>
+          <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-900/80 backdrop-blur-md p-4">
+              <div className="bg-white w-full max-sm rounded-[3rem] shadow-2xl p-8 animate-in zoom-in"><div className="flex items-center gap-3 mb-6"><div className="p-3 bg-blue-50 text-blue-600 rounded-2xl"><Edit3 className="w-6 h-6" /></div><h3 className="text-xl font-black uppercase text-slate-900 tracking-tight">Order Note</h3></div><textarea autoFocus value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Enter instructions..." className="w-full h-32 p-4 bg-slate-50 border border-slate-200 rounded-[1.5rem] outline-none focus:ring-2 focus:ring-blue-600 font-bold text-slate-800 transition-all resize-none" /><div className="grid grid-cols-2 gap-3 mt-6"><button onClick={() => setNoteModalOpen(false)} className="py-4 bg-slate-100 text-slate-500 rounded-2xl font-black uppercase text-xs tracking-widest">Cancel</button><button onClick={() => { if (!currentOrder) return; const newItems = [...currentOrder.items]; newItems[editingItemIndex].note = noteText; setCurrentOrder({...currentOrder, items: newItems}); setNoteModalOpen(false); }} className="py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-lg shadow-blue-200">Save Note</button></div></div>
           </div>
       )}
 
-      {/* MEASURE MODAL */}
-      {measureModalOpen && pendingProduct && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-              <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95">
-                  <div className="text-center mb-6">
-                      <h3 className="text-xl font-black text-gray-800">{pendingProduct.name}</h3>
-                      <p className="text-sm text-gray-500 font-medium uppercase tracking-widest mt-1">Select Measure</p>
-                  </div>
-                  
-                  <div className="grid grid-cols-1 gap-3">
-                      {pendingProduct.spiritPrices?.single ? (
-                          <button 
-                            onClick={() => handleAddToOrder(pendingProduct, "Single Tot", pendingProduct.spiritPrices?.single)}
-                            className="flex justify-between items-center p-4 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl transition-all group"
-                          >
-                              <span className="font-bold text-gray-700">Single / Glass</span>
-                              <span className="font-black text-blue-700">{systemConfig.currency} {pendingProduct.spiritPrices.single.toLocaleString()}</span>
-                          </button>
-                      ) : null}
-
-                      {pendingProduct.spiritPrices?.double ? (
-                          <button 
-                            onClick={() => handleAddToOrder(pendingProduct, "Double Tot", pendingProduct.spiritPrices?.double)}
-                            className="flex justify-between items-center p-4 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-xl transition-all group"
-                          >
-                              <span className="font-bold text-gray-700">Double Tot</span>
-                              <span className="font-black text-purple-700">{systemConfig.currency} {pendingProduct.spiritPrices.double.toLocaleString()}</span>
-                          </button>
-                      ) : null}
-
-                      <button 
-                        onClick={() => handleAddToOrder(pendingProduct, "Bottle", pendingProduct.spiritPrices?.full || pendingProduct.price)}
-                        className="flex justify-between items-center p-4 bg-green-50 hover:bg-green-100 border border-green-200 rounded-xl transition-all group"
-                      >
-                          <span className="font-bold text-gray-700">Full Bottle</span>
-                          <span className="font-black text-green-700">{systemConfig.currency} {(pendingProduct.spiritPrices?.full || pendingProduct.price).toLocaleString()}</span>
-                      </button>
-                  </div>
-
-                  <button onClick={() => setMeasureModalOpen(false)} className="w-full mt-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl font-bold uppercase text-xs">Cancel</button>
-              </div>
-          </div>
-      )}
-
+      <ReceiptPreviewModal 
+        isOpen={previewOpen} 
+        onClose={() => { setPreviewOpen(false); setOrderToPreview(null); }} 
+        order={orderToPreview} 
+        systemConfig={systemConfig} 
+        type="RECEIPT" 
+        printedBy={currentUser?.name || "Waiter"}
+      />
     </div>
   );
 };

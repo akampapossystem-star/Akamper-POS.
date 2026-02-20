@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { Order, Product, SystemConfig, StaffMember, Table } from '../types';
 import { printReceipt } from '../services/receiptService';
+import ReceiptPreviewModal from './ReceiptPreviewModal';
 
 interface BarTabsViewProps {
   orders: Order[];
@@ -19,7 +20,6 @@ interface BarTabsViewProps {
   tables: Table[]; 
 }
 
-// Categories matched from the image
 const CATEGORY_ORDER = ['ALL', 'BRANDY', 'DRINKS', 'GIN', 'LIQUEUR', 'RUM', 'WHISKEY', 'WINE', 'VODKA', 'TEQUILA', 'FOOD'];
 
 const BarTabsView: React.FC<BarTabsViewProps> = ({ 
@@ -34,7 +34,7 @@ const BarTabsView: React.FC<BarTabsViewProps> = ({
 }) => {
   const [viewMode, setViewMode] = useState<'MAP' | 'ORDER'>('MAP');
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
-  const [activeSection, setActiveSection] = useState<string>('Garden 1'); // Default from image
+  const [activeSection, setActiveSection] = useState<string>('Garden 1');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
 
@@ -43,55 +43,43 @@ const BarTabsView: React.FC<BarTabsViewProps> = ({
   const [itemToVoidIndex, setItemToVoidIndex] = useState<number | null>(null);
   const [voidReason, setVoidReason] = useState('');
 
-  // Active Orders (Not paid/completed)
+  // Receipt Preview State
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewType, setPreviewType] = useState<'RECEIPT' | 'KITCHEN' | 'BAR'>('RECEIPT');
+
   const activeTabs = useMemo(() => {
     return (orders || []).filter(o => !['paid', 'completed', 'cancelled', 'merged'].includes(o.status));
   }, [orders]);
 
   const currentTab = activeTabs.find(o => o.id === activeTabId);
 
-  // --- DERIVED DATA ---
-  
-  // 1. Sections from Tables
   const sections = useMemo(() => {
       const distinct = Array.from(new Set(tables.map(t => t.section || 'General'))).sort();
       return distinct.length > 0 ? distinct : ['General'];
   }, [tables]);
 
-  // 2. Visible Tables
   const visibleTables = useMemo(() => {
       return tables.filter(t => (t.section || 'General') === activeSection);
   }, [tables, activeSection]);
 
-  // 3. Filtered Products
   const filteredProducts = useMemo(() => {
     return products.filter(p => {
-      // Category Match
       let catMatch = true;
       if (selectedCategory !== 'ALL') {
-          // Loose matching to handle casing differences
           catMatch = p.category.toUpperCase() === selectedCategory; 
-          // Fallback map for common mismatches if necessary
           if (!catMatch && selectedCategory === 'DRINKS' && ['Water', 'Soda', 'Juice'].includes(p.category)) catMatch = true;
       }
-
-      // Search Match
       const searchMatch = p.name.toLowerCase().includes(searchTerm.toLowerCase());
-      
       return catMatch && searchMatch;
     });
   }, [products, selectedCategory, searchTerm]);
 
-  // --- ACTIONS ---
-
   const handleTableClick = (table: Table) => {
       const existingOrder = activeTabs.find(o => o.table === table.name);
-      
       if (existingOrder) {
           setActiveTabId(existingOrder.id);
           setViewMode('ORDER');
       } else {
-          // Create new Table Order
           const newOrder: Order = {
               id: `TAB-${Date.now()}`,
               tenantId: systemConfig.tenantId,
@@ -139,29 +127,21 @@ const BarTabsView: React.FC<BarTabsViewProps> = ({
       setItemToVoidIndex(null);
   };
 
+  const handleShowPreview = (type: 'RECEIPT' | 'KITCHEN' | 'BAR') => {
+    setPreviewType(type);
+    setPreviewOpen(true);
+  };
+
   const handleSendToKitchen = () => {
       if (!currentTab) return;
       onUpdateOrder({ ...currentTab, status: 'preparing' });
-      printReceipt(systemConfig, currentTab, 'KITCHEN');
-  };
-
-  const handlePrintKOT = () => {
-      if (!currentTab) return;
-      printReceipt(systemConfig, currentTab, 'KITCHEN');
-  };
-
-  const handlePrintBill = () => {
-      if (!currentTab) return;
-      printReceipt(systemConfig, currentTab, 'RECEIPT');
+      handleShowPreview('KITCHEN');
   };
 
   return (
     <div className="h-full flex flex-col bg-[#f0f2f5] overflow-hidden font-sans">
       
-      {/* --- HEADER (Purple Bar) --- */}
       <div className="h-12 bg-[#6b4c60] flex items-center justify-between px-4 shrink-0 shadow-md z-30 text-white select-none">
-          
-          {/* Breadcrumbs */}
           <div className="flex items-center h-full">
               <button 
                   onClick={() => setViewMode('MAP')}
@@ -169,14 +149,10 @@ const BarTabsView: React.FC<BarTabsViewProps> = ({
               >
                   Plan
               </button>
-              
               <div className="h-full w-px bg-white/10"></div>
-
               <div className={`px-6 h-full flex items-center justify-center text-sm font-bold transition-colors ${viewMode === 'ORDER' ? 'bg-[#513849]' : 'text-white/40'}`}>
                   Table
               </div>
-
-              {/* Specific Table Breadcrumb */}
               {currentTab && viewMode === 'ORDER' && (
                   <>
                     <div className="h-full w-px bg-white/10"></div>
@@ -201,13 +177,9 @@ const BarTabsView: React.FC<BarTabsViewProps> = ({
           </div>
       </div>
 
-      {/* --- CONTENT --- */}
       <div className="flex-1 relative overflow-hidden flex flex-col">
-          
-          {/* VIEW: FLOOR PLAN */}
           {viewMode === 'MAP' && (
               <>
-                  {/* Section Tabs */}
                   <div className="h-12 bg-white border-b border-gray-200 flex items-center px-2 gap-1 overflow-x-auto no-scrollbar shrink-0">
                       {sections.map(sec => (
                           <button
@@ -229,9 +201,7 @@ const BarTabsView: React.FC<BarTabsViewProps> = ({
                       </div>
                   </div>
 
-                  {/* Canvas */}
                   <div className="flex-1 bg-white relative overflow-hidden p-8 shadow-inner">
-                        {/* Background Grid */}
                         <div className="absolute inset-0 pointer-events-none opacity-[0.03]" 
                              style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 1px)', backgroundSize: '30px 30px' }}>
                         </div>
@@ -258,11 +228,9 @@ const BarTabsView: React.FC<BarTabsViewProps> = ({
                                     }}
                                 >
                                     <span className="font-black text-2xl tracking-tighter">{table.name}</span>
-                                    <div className="text-[9px] font-bold mt-1 uppercase opacity-60">
-                                        {table.seats} Seats
+                                    <div className={`text-[9px] font-black mt-1 uppercase ${isOccupied ? 'text-red-600 animate-pulse' : 'opacity-60'}`}>
+                                        {isOccupied ? 'Busy' : `${table.seats} Seats`}
                                     </div>
-                                    
-                                    {/* Status Badge Icon */}
                                     <div className={`absolute -top-1 -right-1 p-1 rounded-full shadow-sm text-white ${isOccupied ? 'bg-red-500' : 'bg-green-500'}`}>
                                         {isOccupied ? <Beer className="w-3 h-3 fill-current" /> : <div className="w-3 h-3 rounded-full bg-white/30" />}
                                     </div>
@@ -273,14 +241,9 @@ const BarTabsView: React.FC<BarTabsViewProps> = ({
               </>
           )}
 
-          {/* VIEW: ORDER TERMINAL */}
           {viewMode === 'ORDER' && currentTab && (
               <div className="flex-1 flex overflow-hidden">
-                  
-                  {/* LEFT COLUMN: PRODUCTS */}
                   <div className="flex-1 flex flex-col bg-white border-r border-gray-200 min-w-0">
-                      
-                      {/* Search */}
                       <div className="p-3 border-b border-gray-200 flex gap-2">
                           <div className="relative flex-1">
                               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -294,7 +257,6 @@ const BarTabsView: React.FC<BarTabsViewProps> = ({
                           </div>
                       </div>
 
-                      {/* Dark Category Bar (Scrollable) */}
                       <div className="bg-[#212529] text-gray-400 flex items-center overflow-x-auto no-scrollbar shadow-inner shrink-0 h-12">
                           {CATEGORY_ORDER.map(cat => (
                               <button
@@ -311,7 +273,6 @@ const BarTabsView: React.FC<BarTabsViewProps> = ({
                           ))}
                       </div>
 
-                      {/* Product Grid (Dense) */}
                       <div className="flex-1 overflow-y-auto custom-scrollbar p-3 bg-[#f8f9fa]">
                           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3">
                               {filteredProducts.map(product => (
@@ -324,7 +285,6 @@ const BarTabsView: React.FC<BarTabsViewProps> = ({
                                           {product.image && (
                                               <img src={product.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" alt={product.name} />
                                           )}
-                                          {/* Stock Badge */}
                                           <div className="absolute top-1 right-1 bg-black/60 backdrop-blur text-white text-[9px] font-bold px-1.5 rounded-sm">
                                               {product.stock > 0 ? product.stock : '-'}
                                           </div>
@@ -343,10 +303,7 @@ const BarTabsView: React.FC<BarTabsViewProps> = ({
                       </div>
                   </div>
 
-                  {/* RIGHT COLUMN: BILL / CART */}
                   <div className="w-[350px] lg:w-[380px] bg-white flex flex-col shadow-2xl z-20 border-l border-gray-200 shrink-0">
-                      
-                      {/* Header */}
                       <div className="p-5 border-b border-gray-200 bg-gray-50/50">
                           <h2 className="text-2xl font-black uppercase text-gray-800 tracking-tighter">Table {currentTab.table}</h2>
                           <div className="flex justify-between items-center mt-1 text-xs text-gray-500 font-bold">
@@ -355,7 +312,6 @@ const BarTabsView: React.FC<BarTabsViewProps> = ({
                           </div>
                       </div>
 
-                      {/* Items List */}
                       <div className="flex-1 overflow-y-auto custom-scrollbar p-2">
                           <div className="space-y-1">
                               {currentTab.items.map((item, idx) => (
@@ -390,7 +346,6 @@ const BarTabsView: React.FC<BarTabsViewProps> = ({
                           </div>
                       </div>
 
-                      {/* Footer Actions */}
                       <div className="p-4 bg-gray-50 border-t border-gray-200">
                           <div className="flex justify-between items-center mb-4 px-2">
                               <span className="text-gray-500 font-bold text-xs uppercase tracking-widest">Total</span>
@@ -401,7 +356,6 @@ const BarTabsView: React.FC<BarTabsViewProps> = ({
                           </div>
 
                           <div className="space-y-2">
-                              {/* Primary Action */}
                               <button 
                                   onClick={handleSendToKitchen}
                                   className="w-full py-4 bg-[#0097a7] hover:bg-[#00838f] text-white rounded-xl font-black text-sm uppercase flex items-center justify-center gap-2 shadow-lg shadow-cyan-900/20 active:scale-95 transition-all"
@@ -411,14 +365,14 @@ const BarTabsView: React.FC<BarTabsViewProps> = ({
 
                               <div className="grid grid-cols-2 gap-2">
                                   <button 
-                                      onClick={handlePrintKOT}
+                                      onClick={() => handleShowPreview('KITCHEN')}
                                       className="py-3 bg-white border-2 border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300 rounded-xl font-bold text-xs uppercase flex items-center justify-center gap-2 transition-all active:scale-95"
                                   >
                                       <Printer className="w-4 h-4" /> Token
                                   </button>
                                   
                                   <button 
-                                      onClick={handlePrintBill}
+                                      onClick={() => handleShowPreview('RECEIPT')}
                                       className="py-3 bg-[#374151] hover:bg-[#1f2937] text-white rounded-xl font-bold text-xs uppercase flex items-center justify-center gap-2 shadow-md active:scale-95 transition-all"
                                   >
                                       <FileText className="w-4 h-4" /> Bill
@@ -431,7 +385,15 @@ const BarTabsView: React.FC<BarTabsViewProps> = ({
           )}
       </div>
 
-      {/* Security Void Modal */}
+      {/* RECEIPT PREVIEW MODAL */}
+      <ReceiptPreviewModal 
+          isOpen={previewOpen}
+          onClose={() => setPreviewOpen(false)}
+          order={currentTab}
+          systemConfig={systemConfig}
+          type={previewType as any}
+      />
+
       {isVoidModalOpen && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
               <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl p-8 animate-in zoom-in-95 border border-gray-200">

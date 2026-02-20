@@ -15,7 +15,6 @@ interface PhoneBookContact {
   isFavorite?: boolean;
 }
 
-// Initial Mock Data for Tenants
 const INITIAL_TENANT_CONTACTS: PhoneBookContact[] = [
   { id: '1', name: 'Police Emergency', number: '999', category: 'EMERGENCY', isFavorite: true },
   { id: '2', name: 'Manager John', number: '0700123456', category: 'STAFF', isFavorite: true },
@@ -24,7 +23,6 @@ const INITIAL_TENANT_CONTACTS: PhoneBookContact[] = [
   { id: '5', name: 'VIP Guest Sarah', number: '0788999000', category: 'CUSTOMER' },
 ];
 
-// Initial Mock Data for Master (Independent)
 const INITIAL_MASTER_CONTACTS: PhoneBookContact[] = [
   { id: 'M1', name: 'Kampala Cafe Owner', number: '0741350786', category: 'PARTNER', isFavorite: true },
   { id: 'M2', name: 'System Developer', number: '0700000000', category: 'STAFF' },
@@ -33,30 +31,17 @@ const INITIAL_MASTER_CONTACTS: PhoneBookContact[] = [
 
 interface PhoneBookViewProps {
   currentUser: StaffMember | null;
-  variant?: 'tenant' | 'master'; // New prop to distinguish modes
+  variant?: 'tenant' | 'master';
 }
 
 const PhoneBookView: React.FC<PhoneBookViewProps> = ({ currentUser, variant = 'tenant' }) => {
-  // Use separate initial states based on variant
-  const [contacts, setContacts] = useState<PhoneBookContact[]>(
-      variant === 'master' ? INITIAL_MASTER_CONTACTS : INITIAL_TENANT_CONTACTS
-  );
-  
+  const [contacts, setContacts] = useState<PhoneBookContact[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCategory, setFilterCategory] = useState<'ALL' | 'STAFF' | 'SUPPLIER' | 'CUSTOMER' | 'EMERGENCY' | 'PARTNER'>('ALL');
-  
-  // Dialer / Input State
   const [inputNumber, setInputNumber] = useState('');
   const [isAddingContact, setIsAddingContact] = useState(false);
-  
-  // New Contact Form State
   const [newContactForm, setNewContactForm] = useState<Partial<PhoneBookContact>>({ category: 'CUSTOMER' });
 
-  // Permissions: Only Manager, Cashier, or Owner can delete contacts.
-  // Master is always Owner, so they can always delete in their own book.
-  const canDelete = currentUser && ['MANAGER', 'CASHIER', 'OWNER'].includes(currentUser.role || '');
-
-  // Update contacts if variant changes (e.g. navigation switch)
   useEffect(() => {
       setContacts(variant === 'master' ? INITIAL_MASTER_CONTACTS : INITIAL_TENANT_CONTACTS);
       setFilterCategory('ALL');
@@ -64,14 +49,14 @@ const PhoneBookView: React.FC<PhoneBookViewProps> = ({ currentUser, variant = 't
       setInputNumber('');
   }, [variant]);
 
-  // Filtering Logic
+  const canDelete = currentUser && ['MANAGER', 'CASHIER', 'OWNER'].includes(currentUser.role || '');
+
   const filteredContacts = contacts.filter(c => {
     const matchesSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase()) || c.number.includes(searchTerm);
     const matchesCategory = filterCategory === 'ALL' || c.category === filterCategory;
     return matchesSearch && matchesCategory;
   });
 
-  // Keypad Logic
   const handleKeyPadPress = (key: string) => {
     if (inputNumber.length < 15) {
       setInputNumber(prev => prev + key);
@@ -87,7 +72,6 @@ const PhoneBookView: React.FC<PhoneBookViewProps> = ({ currentUser, variant = 't
     setIsAddingContact(false);
   };
 
-  // Add/Save Contact Logic
   const initiateAddContact = () => {
     setNewContactForm({ number: inputNumber, category: variant === 'master' ? 'PARTNER' : 'CUSTOMER' });
     setIsAddingContact(true);
@@ -95,7 +79,6 @@ const PhoneBookView: React.FC<PhoneBookViewProps> = ({ currentUser, variant = 't
 
   const saveContact = () => {
     if (!newContactForm.name || !newContactForm.number) return;
-
     const newContact: PhoneBookContact = {
       id: `PB-${Date.now()}`,
       name: newContactForm.name || 'Unknown',
@@ -104,10 +87,9 @@ const PhoneBookView: React.FC<PhoneBookViewProps> = ({ currentUser, variant = 't
       note: newContactForm.note,
       isFavorite: false
     };
-
     setContacts(prev => [...prev, newContact]);
     setIsAddingContact(false);
-    setInputNumber(''); // Clear dialer after save
+    setInputNumber('');
     setNewContactForm({ category: 'CUSTOMER' });
   };
 
@@ -117,7 +99,6 @@ const PhoneBookView: React.FC<PhoneBookViewProps> = ({ currentUser, variant = 't
     }
   };
 
-  // Render Helper for Category Badge
   const getCategoryBadge = (category: string) => {
     switch (category) {
       case 'EMERGENCY': return <span className="bg-red-100 text-red-600 text-[10px] font-black px-2 py-0.5 rounded uppercase flex items-center gap-1"><Ambulance className="w-3 h-3" /> Emergency</span>;
@@ -130,18 +111,12 @@ const PhoneBookView: React.FC<PhoneBookViewProps> = ({ currentUser, variant = 't
 
   return (
     <div className={`h-[calc(100vh-64px)] flex overflow-hidden font-sans ${variant === 'master' ? 'bg-[#111827]' : 'bg-gray-50'}`}>
-      
-      {/* --- LEFT SIDE: CONTACT LIST --- */}
       <div className={`w-full md:w-1/2 lg:w-2/5 border-r flex flex-col h-full ${variant === 'master' ? 'bg-[#1f2937] border-gray-700 text-white' : 'bg-white border-gray-200'}`}>
-        
-        {/* Header */}
         <div className={`p-6 border-b ${variant === 'master' ? 'border-gray-700 bg-[#111827]' : 'border-gray-100 bg-gray-50'}`}>
           <h1 className={`text-2xl font-black tracking-tight flex items-center gap-2 mb-4 ${variant === 'master' ? 'text-white' : 'text-gray-800'}`}>
             {variant === 'master' ? <Lock className="w-6 h-6 text-green-500" /> : <Phone className="w-6 h-6 text-blue-600" />}
             {variant === 'master' ? 'My Contacts' : 'Phone Directory'}
           </h1>
-          
-          {/* Search */}
           <div className="relative mb-4">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input 
@@ -156,8 +131,6 @@ const PhoneBookView: React.FC<PhoneBookViewProps> = ({ currentUser, variant = 't
               }`}
             />
           </div>
-
-          {/* Filter Tabs */}
           <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
             {(variant === 'master' 
                 ? ['ALL', 'PARTNER', 'STAFF', 'SUPPLIER'] 
@@ -177,8 +150,6 @@ const PhoneBookView: React.FC<PhoneBookViewProps> = ({ currentUser, variant = 't
             ))}
           </div>
         </div>
-
-        {/* List */}
         <div className="flex-1 overflow-y-auto custom-scrollbar p-2">
           {filteredContacts.length === 0 ? (
             <div className={`h-full flex flex-col items-center justify-center ${variant === 'master' ? 'text-gray-600' : 'text-gray-400'}`}>
@@ -210,7 +181,6 @@ const PhoneBookView: React.FC<PhoneBookViewProps> = ({ currentUser, variant = 't
                       <p className={`text-xs font-mono font-medium ${variant === 'master' ? 'text-gray-500' : 'text-gray-500'}`}>{contact.number}</p>
                     </div>
                   </div>
-                  
                   <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                      {getCategoryBadge(contact.category)}
                      {canDelete && (
@@ -233,16 +203,10 @@ const PhoneBookView: React.FC<PhoneBookViewProps> = ({ currentUser, variant = 't
           )}
         </div>
       </div>
-
-      {/* --- RIGHT SIDE: DIALER & ACTIONS --- */}
       <div className={`hidden md:flex w-full md:w-1/2 lg:w-3/5 flex-col items-center justify-center p-8 relative ${
           variant === 'master' ? 'bg-[#111827]' : 'bg-gray-100'
       }`}>
-        
-        {/* Background Pattern */}
         <div className="absolute inset-0 opacity-5 pointer-events-none" style={{ backgroundImage: "radial-gradient(#9ca3af 1px, transparent 1px)", backgroundSize: "20px 20px" }}></div>
-
-        {/* Input Display Area */}
         <div className={`p-8 rounded-3xl shadow-xl w-full max-w-sm mb-6 flex flex-col items-center border relative z-10 ${
             variant === 'master' 
                 ? 'bg-[#1f2937] border-gray-700' 
@@ -254,16 +218,12 @@ const PhoneBookView: React.FC<PhoneBookViewProps> = ({ currentUser, variant = 't
               ) : (
                  <span className="text-gray-300 text-sm font-bold uppercase tracking-widest">Enter Number</span>
               )}
-              
-              {/* Show matching name if exists */}
               {inputNumber && (
                  <p className={`font-bold text-sm mt-2 h-5 ${variant === 'master' ? 'text-green-400' : 'text-blue-600'}`}>
                     {contacts.find(c => c.number === inputNumber)?.name || (isAddingContact ? 'New Contact' : '')}
                  </p>
               )}
            </div>
-
-           {/* IF ADDING NEW CONTACT */}
            {isAddingContact ? (
               <div className="w-full space-y-4 animate-in fade-in zoom-in duration-200">
                  <div className="space-y-1">
@@ -313,7 +273,6 @@ const PhoneBookView: React.FC<PhoneBookViewProps> = ({ currentUser, variant = 't
                  </div>
               </div>
            ) : (
-              /* KEYPAD GRID */
               <div className="grid grid-cols-3 gap-4 w-full">
                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, '*', 0, '#'].map((key) => (
                     <button
@@ -331,16 +290,13 @@ const PhoneBookView: React.FC<PhoneBookViewProps> = ({ currentUser, variant = 't
               </div>
            )}
         </div>
-
-        {/* Action Buttons (Only show if not adding contact) */}
         {!isAddingContact && (
            <div className="flex gap-4 w-full max-w-sm justify-center">
-              {/* Backspace / Clear */}
               {inputNumber && (
                  <button 
                     onClick={handleBackspace}
                     onDoubleClick={handleClear}
-                    className={`w-20 rounded-2xl flex items-center justify-center shadow-lg transition-all active:scale-95 ${
+                    className={`w-20 h-14 rounded-2xl flex items-center justify-center shadow-lg transition-all active:scale-95 ${
                         variant === 'master' 
                             ? 'bg-gray-700 hover:bg-gray-600 text-gray-300' 
                             : 'bg-gray-200 hover:bg-gray-300 text-gray-600'
@@ -349,8 +305,6 @@ const PhoneBookView: React.FC<PhoneBookViewProps> = ({ currentUser, variant = 't
                     <Delete className="w-6 h-6" />
                  </button>
               )}
-
-              {/* Add Contact Button (If number exists and is not known) */}
               {inputNumber && !contacts.find(c => c.number === inputNumber) && (
                  <button 
                     onClick={initiateAddContact}
@@ -366,7 +320,6 @@ const PhoneBookView: React.FC<PhoneBookViewProps> = ({ currentUser, variant = 't
               )}
            </div>
         )}
-
       </div>
     </div>
   );

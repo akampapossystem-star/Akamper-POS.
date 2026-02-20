@@ -1,8 +1,8 @@
-
-import React, { useState, useEffect, useMemo } from 'react';
-import { ShoppingCart, Grid, User, Coffee, Utensils, X, Trash2, Printer, Save, RefreshCw, Plus, Minus, Search, ChevronLeft, CreditCard, Banknote, Smartphone, Briefcase, LayoutGrid, Wine, GlassWater, Beer, Eye } from 'lucide-react';
-import { Order, SystemConfig, UserRole, RegisterState, Product, Table, Customer, StaffMember, SpiritBottle, OrderItem } from '../types';
-import { printReceipt, generateReceiptHtml } from '../services/receiptService';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { ShoppingCart, Grid, User, Coffee, Utensils, X, Trash2, Printer, Save, RefreshCw, Plus, Minus, Search, ChevronLeft, CreditCard, Banknote, Smartphone, Briefcase, LayoutGrid, Wine, GlassWater, Beer, Eye, AlertTriangle, Martini, ChevronRight, ShoppingBag, ArrowRight } from 'lucide-react';
+import { Order, SystemConfig, UserRole, RegisterState, Product, Table, Customer, StaffMember, SpiritBottle, OrderItem, SpiritLog } from '../types';
+import { printReceipt } from '../services/receiptService';
+import ReceiptPreviewModal from './ReceiptPreviewModal';
 
 interface SellViewProps {
   systemConfig: SystemConfig;
@@ -32,15 +32,24 @@ const SellView: React.FC<SellViewProps> = ({
   const [occupiedOrder, setOccupiedOrder] = useState<Order | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [searchTerm, setSearchTerm] = useState('');
+  const [isMobileCartVisible, setIsMobileCartVisible] = useState(false);
   
   // Measure Selection State
   const [measureModalOpen, setMeasureModalOpen] = useState(false);
   const [pendingProduct, setPendingProduct] = useState<Product | null>(null);
 
-  // Preview State
-  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  // Spirit Coordination State
+  const [bottleSelectModalOpen, setBottleSelectModalOpen] = useState(false);
+  const [activeBottlePour, setActiveBottlePour] = useState<{product: Product, variantName: string, variantPrice: number} | null>(null);
+  const [spiritConsumptionMode, setSpiritConsumptionMode] = useState<'DIRECT' | 'COCKTAIL'>('DIRECT');
 
-  // Dummy logic for categories
+  const [stockError, setStockError] = useState<string | null>(null);
+
+  // Receipt Preview State
+  const [previewOpen, setPreviewOpen] = useState(false);
+
+  const catScrollRef = useRef<HTMLDivElement>(null);
+
   const categories = ['All', ...Array.from(new Set(products.map(p => p.category)))];
 
   const filteredProducts = useMemo(() => {
@@ -51,355 +60,351 @@ const SellView: React.FC<SellViewProps> = ({
     });
   }, [products, selectedCategory, searchTerm]);
 
-  // Initiate add - checks if measure selection is needed
-  const handleItemClick = (product: Product) => {
-      // Check if item is a spirit/wine that needs measure selection
-      const isSpiritOrWine = product.spiritConfig?.isSpirit || 
-                             product.category === 'Wine' || 
-                             product.category === 'Champagne' || 
-                             product.category === 'Whiskey' || 
-                             product.category === 'Vodka' ||
-                             product.category === 'Gin' ||
-                             product.category === 'Rum' ||
-                             product.category === 'Tequila' ||
-                             product.category === 'Liqueur' ||
-                             product.category === 'Brandy';
+  const scrollCats = (dir: 'L' | 'R') => {
+      if (catScrollRef.current) {
+          catScrollRef.current.scrollBy({ left: dir === 'L' ? -250 : 250, behavior: 'smooth' });
+      }
+  };
 
+  const handleItemClick = (product: Product) => {
+      if (product.trackStock && product.stock <= 0) {
+          setStockError(`INVENTORY ERROR: "${product.name}" is out of stock.`);
+          setTimeout(() => setStockError(null), 3000);
+          return;
+      }
+      const isSpiritOrWine = product.spiritConfig?.isSpirit || 
+                             ['Wine', 'Champagne', 'Whiskey', 'Vodka', 'Gin', 'Rum', 'Tequila', 'Cognac'].includes(product.category);
       if (isSpiritOrWine && product.spiritPrices) {
           setPendingProduct(product);
           setMeasureModalOpen(true);
       } else {
-          // Standard product
           addItemToCart(product);
       }
   };
 
   const addItemToCart = (product: Product, variantName?: string, variantPrice?: number) => {
-    // If a variant is selected (e.g. Glass of Wine), we create a temporary product object for the cart
-    const cartProduct = variantName ? {
-        ...product,
-        name: `${product.name} (${variantName})`,
-        price: variantPrice || product.price
-    } : product;
+    const price = variantPrice || product.price;
+    const name = variantName ? `${product.name} (${variantName})` : product.name;
+    
+    const isAlcoholMeasure = variantName && (variantName.includes('Tot') || variantName.includes('Glass') || variantName.includes('Bottle'));
+    if (isAlcoholMeasure) {
+        setActiveBottlePour({ product, variantName, variantPrice: price });
+        setSpiritConsumptionMode('DIRECT');
+        setBottleSelectModalOpen(true);
+        return;
+    }
 
+    applyItemToOrder(product, name, price);
+  };
+
+  const applyItemToOrder = (product: Product, name: string, price: number) => {
     if (!occupiedOrder) {
-      // Create new order
       const newOrder: Order = {
         id: `ORD-${Date.now()}`,
         tenantId: systemConfig.tenantId,
         customerName: 'Walk-in Customer',
         table: 'Walk-in',
-        items: [{ product: cartProduct, quantity: 1 }],
+        items: [{ product: { ...product, name, price }, quantity: 1 }],
         status: 'pending',
         timestamp: new Date(),
         isKitchenOrder: true,
-        grandTotal: cartProduct.price,
+        grandTotal: price,
         amountPaid: 0,
-        staffName: currentUser?.name || 'Cashier', // Set current user as Waiter
+        staffName: currentUser?.name || 'Cashier', 
         staffRole: currentUser?.role
       };
       setOccupiedOrder(newOrder);
     } else {
-      // Update existing order
-      // Check for exact product ID match AND name match (to differentiate Glass vs Bottle of same ID)
-      const existingItemIndex = occupiedOrder.items.findIndex(i => i.product.id === cartProduct.id && i.product.name === cartProduct.name);
+      const existingItemIndex = occupiedOrder.items.findIndex(i => i.product.id === product.id && i.product.name === name);
       let newItems = [...occupiedOrder.items];
-      
       if (existingItemIndex >= 0) {
         newItems[existingItemIndex].quantity += 1;
       } else {
-        newItems.push({ product: cartProduct, quantity: 1 });
+        newItems.push({ product: { ...product, name, price }, quantity: 1 });
       }
-      
       const newTotal = newItems.reduce((acc, item) => acc + (item.product.price * item.quantity), 0);
-      
-      setOccupiedOrder({
-        ...occupiedOrder,
-        items: newItems,
-        grandTotal: newTotal
-      });
+      setOccupiedOrder({ ...occupiedOrder, items: newItems, grandTotal: newTotal });
     }
-    
-    // Close modal if open
     setMeasureModalOpen(false);
     setPendingProduct(null);
   };
 
-  const handlePrintAndClear = () => {
-      if (!occupiedOrder) return;
-      
-      // Register Check
-      if (!registerState.isOpen) {
-          alert("REGISTER CLOSED: Please start your shift in the Dashboard to process payments.");
-          return;
-      }
-      
-      const orderToPrint: Order = {
-          ...occupiedOrder,
-          completedBy: currentUser?.name || 'Cashier' 
-      };
+  const confirmBottlePour = (bottleId: string) => {
+    if (!activeBottlePour) return;
+    const { product, variantName, variantPrice } = activeBottlePour;
+    const bottle = bottles.find(b => b.id === bottleId);
+    if (!bottle) return;
 
-      printReceipt(systemConfig, orderToPrint, 'RECEIPT');
-      
-      const completedOrder: Order = { 
-          ...orderToPrint, 
-          status: 'paid', 
-          amountPaid: occupiedOrder.grandTotal, 
-          paymentMethod: 'CASH' 
+    const isWine = ['WINE', 'CHAMPAGNE'].includes(bottle.type);
+    let vol = 0;
+    let totCount = 1;
+    if (variantName === 'Single Tot' || variantName === 'Glass') {
+        vol = isWine ? 150 : (bottle.measureStandard === 'NEW_25ML' ? 25 : 30);
+        totCount = 1;
+    } else if (variantName === 'Double Tot') {
+        vol = bottle.measureStandard === 'NEW_25ML' ? 50 : 60;
+        totCount = 2;
+    } else if (variantName === 'Half Bottle') {
+        vol = Math.floor(bottle.totalVolume / 2);
+        totCount = 10;
+    } else if (variantName === 'Bottle' || variantName === 'Full Bottle') {
+        vol = bottle.currentVolume;
+        totCount = Math.floor(bottle.totalVolume / (bottle.measureStandard === 'NEW_25ML' ? 25 : 30));
+    }
+
+    if (bottle.currentVolume < vol) {
+        alert(`Insufficient volume! Only ${bottle.currentVolume}ml left.`);
+        return;
+    }
+
+    const logEntry: SpiritLog = {
+        id: `LOG-SALE-${Date.now()}`,
+        timestamp: new Date(),
+        quantityMl: vol,
+        tots: totCount,
+        type: isWine ? 'GLASS' : spiritConsumptionMode,
+        staffName: currentUser?.name || 'Cashier'
+    };
+
+    const updatedBottles = bottles.map(b => {
+        if (b.id === bottleId) {
+            const newVol = Math.max(0, b.currentVolume - vol);
+            return { ...b, currentVolume: newVol, status: (newVol < 20 ? 'EMPTY' : 'OPEN') as any, logs: b.logs ? [...b.logs, logEntry] : [logEntry] };
+        }
+        return b;
+    });
+    onUpdateBottles(updatedBottles);
+
+    applyItemToOrder(product, `${product.name} (${variantName})`, variantPrice);
+    setBottleSelectModalOpen(false);
+    setActiveBottlePour(null);
+  };
+
+  const handleProcessFinish = () => {
+      if (!occupiedOrder) return;
+      const orderToSave: Order = { 
+        ...occupiedOrder, 
+        completedBy: currentUser?.name || 'Cashier',
+        status: 'paid', 
+        amountPaid: occupiedOrder.grandTotal, 
+        paymentMethod: 'CASH' 
       };
-      
-      onUpdateOrder(completedOrder);
-      if (!orders.find(o => o.id === completedOrder.id)) {
-          onPlaceOrder(completedOrder);
-      }
+      onUpdateOrder(orderToSave);
+      if (!orders.find(o => o.id === orderToSave.id)) { onPlaceOrder(orderToSave); }
       setOccupiedOrder(null);
+      setIsMobileCartVisible(false);
   };
 
-  const handleSaveOrder = () => {
-      if (!occupiedOrder) return;
-      if (!orders.find(o => o.id === occupiedOrder.id)) {
-          onPlaceOrder(occupiedOrder);
-      } else {
-          onUpdateOrder(occupiedOrder);
-      }
-      setOccupiedOrder(null);
+  const handleStartPreview = () => {
+    if (!occupiedOrder) return;
+    if (!registerState.isOpen) {
+        setStockError("ACCESS ERROR: Register is closed. Start shift in Dashboard.");
+        setTimeout(() => setStockError(null), 4000);
+        return;
+    }
+    setPreviewOpen(true);
   };
 
-  const handlePreviewReceipt = () => {
-      if (!occupiedOrder) return;
-      const orderToPreview: Order = {
-          ...occupiedOrder,
-          completedBy: currentUser?.name || 'Cashier' 
-      };
-      const html = generateReceiptHtml(systemConfig, orderToPreview, 'RECEIPT');
-      setPreviewHtml(html);
-  };
-
-  // Helper to determine if product is wine type for labeling
   const isWineOrChampagne = pendingProduct && ['Wine', 'Champagne', 'Red Wine', 'White Wine'].includes(pendingProduct.category);
 
-  return (
-    <div className="flex h-full bg-gray-100 font-sans">
-      {/* Left: Product Grid */}
-      <div className="flex-1 flex flex-col p-4 overflow-hidden">
-        {/* Categories */}
-        <div className="flex gap-2 overflow-x-auto pb-4 scrollbar-hide">
-          {categories.map(cat => (
-            <button
-              key={cat}
-              onClick={() => setSelectedCategory(cat)}
-              className={`px-6 py-3 rounded-xl font-bold text-sm whitespace-nowrap transition-colors ${
-                selectedCategory === cat ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
-              }`}
-            >
-              {cat}
-            </button>
-          ))}
-        </div>
+  const cartItemCount = occupiedOrder?.items.reduce((sum, item) => sum + item.quantity, 0) || 0;
 
-        {/* Products */}
-        <div className="flex-1 overflow-y-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pb-20">
-          {filteredProducts.map(product => (
-            <button
-              key={product.id}
-              onClick={() => handleItemClick(product)}
-              className="bg-white p-4 rounded-xl shadow-sm hover:shadow-md transition-all text-left flex flex-col justify-between group h-40"
-            >
-              <div>
-                <h3 className="font-bold text-gray-800 line-clamp-2">{product.name}</h3>
-                <p className="text-xs text-gray-500 mt-1">{product.category}</p>
-              </div>
-              <div className="mt-2 font-black text-blue-600">
-                {systemConfig.currency} {product.price.toLocaleString()}
-              </div>
-            </button>
-          ))}
+  const OrderSummaryPanel = () => (
+    <div className={`flex flex-col h-full bg-white shadow-xl z-[80]`}>
+        <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center shrink-0">
+            <h2 className="font-black text-lg text-gray-800 uppercase tracking-tight">Active Ticket</h2>
+            <button onClick={() => setIsMobileCartVisible(false)} className="lg:hidden p-2 text-gray-400 hover:text-gray-900"><X /></button>
         </div>
-      </div>
-
-      {/* Right: Cart */}
-      <div className="w-96 bg-white border-l border-gray-200 flex flex-col h-full shadow-xl z-10">
-        <div className="p-4 border-b border-gray-100 bg-gray-50">
-          <h2 className="font-black text-lg text-gray-800">Current Order</h2>
-          <p className="text-xs text-gray-500 font-medium">
-            {occupiedOrder ? `Order #${occupiedOrder.id.slice(-4)}` : 'Empty Cart'}
-          </p>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
           {occupiedOrder?.items.map((item, idx) => (
-            <div key={idx} className="flex justify-between items-center border-b border-gray-50 pb-2">
-              <div>
-                <p className="font-bold text-sm text-gray-800">{item.product.name}</p>
-                <p className="text-xs text-gray-500">{item.quantity} x {item.product.price.toLocaleString()}</p>
+            <div key={idx} className="flex justify-between items-start border-b border-gray-50 pb-3">
+              <div className="flex gap-3">
+                 <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center font-black text-xs shrink-0">{item.quantity}x</div>
+                 <div><p className="font-bold text-sm text-gray-800 leading-tight">{item.product.name}</p><p className="text-[10px] text-gray-400 font-bold uppercase mt-1">@ {item.product.price.toLocaleString()}</p></div>
               </div>
-              <div className="font-black text-gray-900 text-sm">
-                {(item.quantity * item.product.price).toLocaleString()}
-              </div>
+              <div className="font-black text-gray-900 text-sm">{(item.quantity * item.product.price).toLocaleString()}</div>
             </div>
           ))}
-          {!occupiedOrder && (
-            <div className="h-full flex items-center justify-center text-gray-400 text-sm italic">
-              Add items to start order
-            </div>
+          {!occupiedOrder?.items.length && (
+              <div className="h-full flex flex-col items-center justify-center text-slate-300 opacity-40">
+                  <ShoppingBag className="w-16 h-16 mb-4" />
+                  <p className="font-black uppercase text-xs">Empty Order</p>
+              </div>
           )}
         </div>
-
-        <div className="p-4 border-t border-gray-100 bg-gray-50">
-          <div className="flex justify-between items-center mb-4">
-            <span className="font-bold text-gray-600">Total</span>
-            <span className="font-black text-2xl text-gray-900">
-              {systemConfig.currency} {occupiedOrder?.grandTotal.toLocaleString() || '0'}
-            </span>
+        <div className="p-6 border-t border-gray-100 bg-gray-50 shrink-0">
+          <div className="flex justify-between items-center mb-6">
+              <span className="font-black text-gray-400 uppercase text-[10px] tracking-widest">Grand Total</span>
+              <span className="font-black text-3xl text-gray-900 tracking-tighter">
+                  <span className="text-xs text-blue-400 mr-2 uppercase">{systemConfig.currency}</span>
+                  {occupiedOrder?.grandTotal.toLocaleString() || '0'}
+              </span>
           </div>
-          
           <div className="grid grid-cols-2 gap-3">
-            <button 
-              onClick={() => setOccupiedOrder(null)}
-              disabled={!occupiedOrder}
-              className="py-3 bg-red-100 text-red-600 rounded-xl font-bold text-sm hover:bg-red-200 disabled:opacity-50"
-            >
-              Clear
-            </button>
-            <button 
-              onClick={handleSaveOrder}
-              disabled={!occupiedOrder}
-              className="py-3 bg-blue-100 text-blue-600 rounded-xl font-bold text-sm hover:bg-blue-200 disabled:opacity-50"
-            >
-              Save
-            </button>
-            <button 
-              onClick={handlePreviewReceipt}
-              disabled={!occupiedOrder}
-              className="col-span-2 py-3 bg-gray-800 text-white rounded-xl font-bold text-sm hover:bg-gray-900 disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              <Eye className="w-4 h-4" /> Preview Bill
-            </button>
-            <button 
-              onClick={handlePrintAndClear}
-              disabled={!occupiedOrder}
-              className="col-span-2 py-4 bg-green-600 text-white rounded-xl font-black text-lg shadow-lg hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              <Printer className="w-5 h-5" /> Pay & Print
-            </button>
+            <button onClick={() => { setOccupiedOrder(null); setIsMobileCartVisible(false); }} disabled={!occupiedOrder} className="py-4 bg-red-50 text-red-600 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-red-100 active:scale-95 transition-all">Clear</button>
+            <button onClick={() => { if(occupiedOrder) onUpdateOrder(occupiedOrder); setOccupiedOrder(null); setIsMobileCartVisible(false); }} disabled={!occupiedOrder} className="py-4 bg-blue-50 text-blue-600 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-blue-100 active:scale-95 transition-all">Park</button>
+            <button onClick={handleStartPreview} disabled={!occupiedOrder} className="col-span-2 py-5 bg-green-600 text-white rounded-[2rem] font-black text-sm uppercase tracking-widest shadow-xl shadow-emerald-100 flex items-center justify-center gap-3 active:scale-95 transition-all"><Printer className="w-5 h-5" /> Print Receipt</button>
           </div>
+        </div>
+    </div>
+  );
+
+  return (
+    <div className="flex h-full bg-gray-100 font-sans relative overflow-hidden">
+      {stockError && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[300] bg-red-600 text-white px-6 py-3 rounded-full font-black shadow-2xl flex items-center gap-3 animate-in slide-in-from-top-4">
+              <AlertTriangle className="w-5 h-5" /> {stockError}
+              <button onClick={() => setStockError(null)} className="p-1 hover:bg-red-50 rounded-full transition-colors"><X className="w-4 h-4"/></button>
+          </div>
+      )}
+
+      {/* Main Product Feed */}
+      <div className="flex-1 flex flex-col p-4 md:p-6 overflow-hidden">
+        
+        {/* SCROLLABLE CATEGORIES */}
+        <div className="relative flex items-center mb-6 group/catstrip">
+            <button 
+                onClick={() => scrollCats('L')}
+                className="absolute left-0 z-20 p-2 bg-white/90 rounded-full shadow-lg border border-gray-100 text-gray-400 hover:text-blue-600 transition-all opacity-0 lg:group-hover/catstrip:opacity-100 -translate-x-2"
+            >
+                <ChevronLeft className="w-5 h-5" />
+            </button>
+
+            <div className="absolute left-0 top-0 bottom-0 w-12 bg-gradient-to-r from-gray-100 to-transparent z-10 pointer-events-none"></div>
+
+            <div 
+                ref={catScrollRef}
+                className="flex gap-2 overflow-x-auto no-scrollbar scroll-smooth px-10 py-1"
+            >
+                {categories.map(cat => (
+                    <button 
+                        key={cat} 
+                        onClick={() => setSelectedCategory(cat)} 
+                        className={`px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest whitespace-nowrap transition-all shadow-sm ${selectedCategory === cat ? 'bg-blue-600 text-white shadow-blue-200' : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-100'}`}
+                    >
+                        {cat}
+                    </button>
+                ))}
+            </div>
+
+            <div className="absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-gray-100 to-transparent z-10 pointer-events-none"></div>
+
+            <button 
+                onClick={() => scrollCats('R')}
+                className="absolute right-0 z-20 p-2 bg-white/90 rounded-full shadow-lg border border-gray-100 text-gray-400 hover:text-blue-600 transition-all opacity-0 lg:group-hover/catstrip:opacity-100 translate-x-2"
+            >
+                <ChevronRight className="w-5 h-5" />
+            </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-4 pb-24 custom-scrollbar">
+          {filteredProducts.map(product => (
+              <button 
+                key={product.id} 
+                onClick={() => handleItemClick(product)} 
+                className="bg-white p-4 rounded-3xl shadow-sm hover:shadow-xl transition-all text-left flex flex-col h-44 group relative overflow-hidden border border-gray-100"
+              >
+                <div className="flex-1 min-w-0">
+                    <h3 className="font-black text-gray-800 text-sm leading-tight line-clamp-2 uppercase tracking-tight">{product.name}</h3>
+                    <p className="text-[10px] font-bold text-gray-400 mt-1 uppercase tracking-widest">{product.category}</p>
+                </div>
+                <div className="mt-auto flex justify-between items-end">
+                    <div className="font-black text-blue-600 text-lg leading-none">
+                        <span className="text-[10px] opacity-40 mr-1">{systemConfig.currency}</span>
+                        {product.price.toLocaleString()}
+                    </div>
+                    <div className="w-8 h-8 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-all shadow-sm">
+                        <Plus className="w-4 h-4" />
+                    </div>
+                </div>
+              </button>
+          ))}
         </div>
       </div>
 
-      {/* --- MEASURE SELECTION MODAL --- */}
+      {/* Side Cart (Desktop) */}
+      <div className="hidden lg:flex w-96 border-l border-gray-200 h-full">
+        <OrderSummaryPanel />
+      </div>
+
+      {/* Mobile Cart Overlay */}
+      {isMobileCartVisible && (
+          <div className="fixed inset-0 z-[100] lg:hidden animate-in fade-in duration-300">
+              <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsMobileCartVisible(false)} />
+              <div className="absolute right-0 top-0 bottom-0 w-full max-w-[400px] animate-in slide-in-from-right-full duration-500 shadow-2xl">
+                  <OrderSummaryPanel />
+              </div>
+          </div>
+      )}
+
+      {/* Mobile Floating Action Button (Cart) */}
+      {occupiedOrder && !isMobileCartVisible && (
+          <button 
+            onClick={() => setIsMobileCartVisible(true)}
+            className="lg:hidden fixed bottom-6 right-6 p-6 bg-[#2563eb] text-white rounded-full shadow-2xl z-[90] flex items-center gap-3 animate-bounce active:scale-90 transition-all border-4 border-white/20"
+          >
+              <ShoppingCart className="w-7 h-7" />
+              <div className="flex flex-col items-start leading-none pr-1">
+                <span className="text-[10px] font-black uppercase tracking-widest opacity-70">Review Bill</span>
+                <span className="font-black text-lg">{cartItemCount} Items</span>
+              </div>
+              <ArrowRight className="w-5 h-5 ml-1 opacity-50" />
+          </button>
+      )}
+
+      <ReceiptPreviewModal 
+          isOpen={previewOpen}
+          onClose={() => setPreviewOpen(false)}
+          order={occupiedOrder}
+          systemConfig={systemConfig}
+          type="RECEIPT"
+          onConfirm={handleProcessFinish}
+          printedBy={currentUser?.name || "System Admin"}
+      />
+
+      {/* Bottle/Measure Modals (Already Responsive) */}
+      {bottleSelectModalOpen && activeBottlePour && (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+              <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl p-8 animate-in zoom-in-95">
+                  <h3 className="text-xl font-black uppercase text-slate-900 mb-2">Bottle Match</h3>
+                  <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mb-6">Select bottle for {activeBottlePour.product.name}</p>
+                  
+                  {!['WINE', 'CHAMPAGNE'].includes(activeBottlePour.product.category.toUpperCase()) && !activeBottlePour.variantName.includes('Bottle') && (
+                      <div className="mb-6 space-y-2">
+                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block text-center">Pour Type</label>
+                        <div className="flex bg-slate-100 p-1 rounded-2xl">
+                            <button onClick={() => setSpiritConsumptionMode('DIRECT')} className={`flex-1 py-3 rounded-xl text-xs font-black uppercase transition-all ${spiritConsumptionMode === 'DIRECT' ? 'bg-white text-blue-600 shadow-md' : 'text-slate-400'}`}>Direct</button>
+                            <button onClick={() => setSpiritConsumptionMode('COCKTAIL')} className={`flex-1 py-3 rounded-xl text-xs font-black uppercase transition-all ${spiritConsumptionMode === 'COCKTAIL' ? 'bg-white text-pink-600 shadow-md' : 'text-slate-400'}`}>Cocktail</button>
+                        </div>
+                      </div>
+                  )}
+
+                  <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-2 mb-6">
+                      {bottles.filter(b => b.status === 'OPEN' && b.name.toLowerCase().includes(activeBottlePour.product.name.toLowerCase())).map(bottle => (
+                          <button key={bottle.id} onClick={() => confirmBottlePour(bottle.id)} className="w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-blue-50 border border-gray-100 rounded-2xl transition-all">
+                              <span className="font-bold text-gray-800 text-sm">{bottle.name}</span>
+                              <span className="font-black text-blue-600 text-xs">{bottle.currentVolume}ml Left</span>
+                          </button>
+                      ))}
+                  </div>
+                  <button onClick={() => { setBottleSelectModalOpen(false); setActiveBottlePour(null); }} className="w-full py-4 text-gray-400 font-bold uppercase text-xs">Cancel</button>
+              </div>
+          </div>
+      )}
+
       {measureModalOpen && pendingProduct && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-              <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95">
-                  <div className="text-center mb-6">
-                      <h3 className="text-xl font-black text-gray-800">{pendingProduct.name}</h3>
-                      <p className="text-sm text-gray-500 font-medium uppercase tracking-widest mt-1">Select Measure</p>
-                  </div>
-                  
+              <div className="bg-white w-full max-sm rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95">
+                  <div className="text-center mb-6"><h3 className="text-xl font-black text-gray-800">{pendingProduct.name}</h3><p className="text-sm text-gray-500 font-medium uppercase tracking-widest mt-1">Select Measure</p></div>
                   <div className="grid grid-cols-1 gap-3">
-                      {pendingProduct.spiritPrices?.single ? (
-                          <button 
-                            onClick={() => addItemToCart(pendingProduct, isWineOrChampagne ? "Glass" : "Single Tot", pendingProduct.spiritPrices?.single)}
-                            className="flex justify-between items-center p-4 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl transition-all group"
-                          >
-                              <div className="flex items-center gap-3">
-                                  <div className="w-10 h-10 rounded-full bg-blue-200 flex items-center justify-center text-blue-700"><GlassWater className="w-5 h-5"/></div>
-                                  <span className="font-bold text-gray-700">{isWineOrChampagne ? "Glass" : "Single Tot"}</span>
-                              </div>
-                              <span className="font-black text-blue-700">{systemConfig.currency} {pendingProduct.spiritPrices.single.toLocaleString()}</span>
-                          </button>
-                      ) : null}
-
-                      {pendingProduct.spiritPrices?.double ? (
-                          <button 
-                            onClick={() => addItemToCart(pendingProduct, "Double Tot", pendingProduct.spiritPrices?.double)}
-                            className="flex justify-between items-center p-4 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-xl transition-all group"
-                          >
-                              <div className="flex items-center gap-3">
-                                  <div className="w-10 h-10 rounded-full bg-purple-200 flex items-center justify-center text-purple-700"><GlassWater className="w-5 h-5"/><Plus className="w-3 h-3"/></div>
-                                  <span className="font-bold text-gray-700">Double Tot</span>
-                              </div>
-                              <span className="font-black text-purple-700">{systemConfig.currency} {pendingProduct.spiritPrices.double.toLocaleString()}</span>
-                          </button>
-                      ) : null}
-
-                      {pendingProduct.spiritPrices?.half ? (
-                          <button 
-                            onClick={() => addItemToCart(pendingProduct, "Half Bottle", pendingProduct.spiritPrices?.half)}
-                            className="flex justify-between items-center p-4 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded-xl transition-all group"
-                          >
-                              <div className="flex items-center gap-3">
-                                  <div className="w-10 h-10 rounded-full bg-orange-200 flex items-center justify-center text-orange-700"><Wine className="w-5 h-5"/></div>
-                                  <span className="font-bold text-gray-700">Half Bottle</span>
-                              </div>
-                              <span className="font-black text-orange-700">{systemConfig.currency} {pendingProduct.spiritPrices.half.toLocaleString()}</span>
-                          </button>
-                      ) : null}
-
-                      <button 
-                        onClick={() => addItemToCart(pendingProduct, "Full Bottle", pendingProduct.spiritPrices?.full || pendingProduct.price)}
-                        className="flex justify-between items-center p-4 bg-green-50 hover:bg-green-100 border border-green-200 rounded-xl transition-all group"
-                      >
-                          <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-full bg-green-200 flex items-center justify-center text-green-700"><Beer className="w-5 h-5"/></div>
-                              <span className="font-bold text-gray-700">{isWineOrChampagne ? "Bottle" : "Full Bottle"}</span>
-                          </div>
-                          <span className="font-black text-green-700">{systemConfig.currency} {(pendingProduct.spiritPrices?.full || pendingProduct.price).toLocaleString()}</span>
-                      </button>
+                      {pendingProduct.spiritPrices?.single && <button onClick={() => addItemToCart(pendingProduct, isWineOrChampagne ? "Glass" : "Single Tot", pendingProduct.spiritPrices?.single)} className="flex justify-between items-center p-4 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl transition-all group"><span className="font-bold text-gray-700">{isWineOrChampagne ? "Glass" : "Single Tot"}</span><span className="font-black text-blue-700">{systemConfig.currency} {pendingProduct.spiritPrices.single.toLocaleString()}</span></button>}
+                      {pendingProduct.spiritPrices?.double && <button onClick={() => addItemToCart(pendingProduct, "Double Tot", pendingProduct.spiritPrices?.double)} className="flex justify-between items-center p-4 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-xl transition-all group"><span className="font-bold text-gray-700">Double Tot</span><span className="font-black text-purple-700">{systemConfig.currency} {pendingProduct.spiritPrices.double.toLocaleString()}</span></button>}
+                      <button onClick={() => addItemToCart(pendingProduct, "Full Bottle", pendingProduct.spiritPrices?.full || pendingProduct.price)} className="flex justify-between items-center p-4 bg-green-50 hover:bg-green-100 border-green-200 rounded-xl transition-all group"><span className="font-bold text-gray-700">Full Bottle</span><span className="font-black text-green-700">{systemConfig.currency} {(pendingProduct.spiritPrices?.full || pendingProduct.price).toLocaleString()}</span></button>
                   </div>
-
                   <button onClick={() => setMeasureModalOpen(false)} className="w-full mt-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl font-bold uppercase text-xs">Cancel</button>
               </div>
           </div>
       )}
-
-      {/* --- RECEIPT PREVIEW MODAL --- */}
-      {previewHtml && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
-              <div className="bg-white w-full max-w-sm rounded-xl shadow-2xl overflow-hidden h-[85vh] flex flex-col animate-in zoom-in-95 duration-200">
-                  <div className="p-4 bg-gray-900 text-white flex justify-between items-center shrink-0">
-                      <h3 className="font-bold text-sm uppercase tracking-widest">Receipt Preview</h3>
-                      <button onClick={() => setPreviewHtml(null)} className="hover:text-gray-300"><X className="w-5 h-5" /></button>
-                  </div>
-                  <div className="flex-1 bg-gray-200 p-4 overflow-y-auto flex justify-center">
-                      <div className="bg-white shadow-lg w-full h-full min-h-[400px]">
-                          <iframe 
-                              srcDoc={previewHtml} 
-                              title="Receipt Preview"
-                              className="w-full h-full border-none"
-                          />
-                      </div>
-                  </div>
-                  <div className="p-4 bg-white border-t border-gray-200 flex gap-3">
-                      <button 
-                          onClick={() => setPreviewHtml(null)} 
-                          className="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold text-xs uppercase hover:bg-gray-200"
-                      >
-                          Close
-                      </button>
-                      <button 
-                          onClick={() => {
-                              const iframe = document.createElement('iframe');
-                              iframe.style.position = 'fixed';
-                              iframe.style.visibility = 'hidden';
-                              document.body.appendChild(iframe);
-                              iframe.contentWindow?.document.open();
-                              iframe.contentWindow?.document.write(previewHtml);
-                              iframe.contentWindow?.document.close();
-                              iframe.onload = () => {
-                                  iframe.contentWindow?.focus();
-                                  iframe.contentWindow?.print();
-                                  setTimeout(() => document.body.removeChild(iframe), 2000);
-                              };
-                          }} 
-                          className="flex-1 py-3 bg-green-600 text-white rounded-xl font-black text-xs uppercase hover:bg-green-700 flex items-center justify-center gap-2"
-                      >
-                          <Printer className="w-4 h-4" /> Print Now
-                      </button>
-                  </div>
-              </div>
-          </div>
-      )}
-
     </div>
   );
 };

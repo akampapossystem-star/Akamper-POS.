@@ -252,6 +252,7 @@ const TableManagementView: React.FC<TableManagementViewProps> = ({ tables, onAdd
                      }}
                   >
                      <span className={`font-black text-2xl tracking-tighter ${isOccupied ? 'text-red-800' : 'text-gray-600'}`}>{table.name}</span>
+                     {isOccupied && <span className="text-[10px] font-black text-red-600 uppercase animate-pulse">Busy</span>}
                      
                      {/* Edit Indicator overlay */}
                      {isSelected && (
@@ -291,7 +292,7 @@ const TableManagementView: React.FC<TableManagementViewProps> = ({ tables, onAdd
                 </div>
                 <div className="flex items-center gap-2">
                     <div className="w-3 h-3 rounded-full bg-[#fee2e2] border border-red-300"></div>
-                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Occupied</span>
+                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Busy</span>
                 </div>
             </div>
             <span className="text-[10px] text-gray-400 uppercase font-black tracking-[0.2em]">{visibleTables.length} Objects Loaded</span>

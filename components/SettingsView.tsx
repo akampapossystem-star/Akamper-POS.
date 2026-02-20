@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect } from 'react';
-import { LifeBuoy, Lock, FileText, Upload, Save, CheckCircle, UtensilsCrossed, ImageIcon, Printer, Coins, Palette, Monitor, Ruler, Type, Phone, Mail, Eye } from 'lucide-react';
+import { LifeBuoy, Lock, FileText, Upload, Save, CheckCircle, UtensilsCrossed, ImageIcon, Printer, Coins, Palette, Monitor, Ruler, Type, Phone, Mail, Eye, Info } from 'lucide-react';
 import { SystemConfig, UserRole, StaffMember } from '../types';
 import { printTestReceipt, generateReceiptHtml } from '../services/receiptService';
 
@@ -53,7 +52,6 @@ const SettingsView: React.FC<SettingsViewProps> = ({ config, setConfig, userRole
     setLocal(config);
   }, [config]);
 
-  // Root Admin Check (Strictly for UI elements)
   const isRootAdmin = currentUser?.id === 'ROOT' || currentUser?.id?.startsWith('MASTER_OVERRIDE');
 
   const handleReceiptChange = (key: keyof SystemConfig['receipt'], value: any) => {
@@ -71,10 +69,11 @@ const SettingsView: React.FC<SettingsViewProps> = ({ config, setConfig, userRole
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
+        const result = reader.result as string;
         setLocal(prev => ({ 
             ...prev, 
-            logo: reader.result as string,
-            receipt: { ...prev.receipt, logoUrl: reader.result as string }
+            logo: result,
+            receipt: { ...prev.receipt, logoUrl: result }
         }));
       };
       reader.readAsDataURL(file);
@@ -82,12 +81,11 @@ const SettingsView: React.FC<SettingsViewProps> = ({ config, setConfig, userRole
   };
 
   const saveSettings = () => {
-    // Passes local state up to App.tsx which handles saving to specific tenant record
     setConfig(local);
   };
 
   const handlePreview = () => {
-      const html = generateReceiptHtml(local, null, 'TEST');
+      const html = generateReceiptHtml(local, null, 'TEST', null, currentUser?.name || "Settings Admin");
       setPreviewHtml(html);
       setShowPreview(true);
   };
@@ -106,6 +104,20 @@ const SettingsView: React.FC<SettingsViewProps> = ({ config, setConfig, userRole
             >
                 <Save className="w-5 h-5" /> Save Changes
             </button>
+        </div>
+
+        {/* System Support Alert */}
+        <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-2xl flex items-start gap-4">
+            <div className="p-2 bg-indigo-600 rounded-xl text-white shrink-0">
+                <LifeBuoy className="w-5 h-5" />
+            </div>
+            <div>
+                <h4 className="text-sm font-black text-indigo-900 uppercase tracking-tight">System Support Contact</h4>
+                <p className="text-xs text-indigo-700 mt-1">
+                    The platform technical support line is managed globally: <span className="font-black">+256 74-1350 786</span>. 
+                    This appears on all receipts and cannot be removed by local administrators.
+                </p>
+            </div>
         </div>
 
         <section className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100">
@@ -151,27 +163,34 @@ const SettingsView: React.FC<SettingsViewProps> = ({ config, setConfig, userRole
                 {isMasterView ? 'Global System Identity' : 'Business Identity'}
             </h3>
             <div className="flex flex-col md:flex-row items-center gap-8 mb-8 p-6 bg-gray-50 rounded-3xl border border-gray-100">
-                <div className="w-32 h-32 bg-white rounded-full border-4 border-white shadow-lg flex items-center justify-center relative overflow-hidden group shrink-0">
+                <div className="w-32 h-32 bg-white rounded-[2rem] border-4 border-gray-100 shadow-xl flex items-center justify-center relative overflow-hidden group shrink-0">
                     {local.logo ? (
-                        <img src={local.logo} alt="Business Logo" className="w-full h-full object-contain p-2" />
+                        <img src={local.logo} alt="Business Logo" className="w-full h-full object-contain" />
                     ) : (
                         <ImageIcon className="w-12 h-12 text-gray-300" />
                     )}
-                    <label className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer rounded-full">
-                        <Upload className="w-6 h-6 text-white" />
-                        <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+                    <label className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+                        <Upload className="w-8 h-8 text-white mb-1" />
+                        <span className="text-[10px] font-black text-white uppercase tracking-widest">Update</span>
+                        <input 
+                            type="file" 
+                            accept="image/*,.heic,.heif,.avif,.webp,.svg,.bmp,.tiff" 
+                            onChange={handleLogoUpload} 
+                            className="hidden" 
+                        />
                     </label>
                 </div>
-                <div className="flex-1 space-y-4 w-full">
+                <div className="flex-1 space-y-4 w-full text-center md:text-left">
                     <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-gray-400 uppercase">Page Name</label>
+                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Business Display Name</label>
                         <input 
                             type="text" 
                             value={local.name}
                             onChange={(e) => setLocal({...local, name: e.target.value})}
-                            className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-gray-700"
+                            className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-black text-gray-800 text-lg uppercase tracking-tight"
                         />
                     </div>
+                    <p className="text-xs text-gray-400 font-medium">This name appears on the Login screen, Sidebar, and printed receipts.</p>
                 </div>
             </div>
         </section>
@@ -185,14 +204,13 @@ const SettingsView: React.FC<SettingsViewProps> = ({ config, setConfig, userRole
                     <button onClick={handlePreview} className="bg-gray-100 text-gray-600 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase flex items-center gap-2 hover:bg-gray-200">
                         <Eye className="w-3.5 h-3.5" /> Preview
                     </button>
-                    <button onClick={() => printTestReceipt(local)} className="bg-pink-100 text-pink-700 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase flex items-center gap-2 hover:bg-pink-200">
+                    <button onClick={() => printTestReceipt(local, currentUser?.name || "Settings Admin")} className="bg-pink-100 text-pink-700 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase flex items-center gap-2 hover:bg-pink-200">
                         <Printer className="w-3.5 h-3.5" /> Test Print
                     </button>
                 </div>
             </div>
 
             <div className="space-y-6">
-                 {/* NEW: Editable Header Contacts */}
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-50 p-6 rounded-2xl border border-slate-100">
                     <div className="space-y-1">
                         <label className="text-[10px] font-black text-gray-400 uppercase flex items-center gap-2">
@@ -218,7 +236,6 @@ const SettingsView: React.FC<SettingsViewProps> = ({ config, setConfig, userRole
                             placeholder="support@business.com"
                         />
                     </div>
-                    <p className="col-span-full text-[9px] text-gray-400 font-bold uppercase tracking-wider">These contacts appear below the logo on printed receipts.</p>
                  </div>
 
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -235,69 +252,15 @@ const SettingsView: React.FC<SettingsViewProps> = ({ config, setConfig, userRole
                       <textarea 
                         value={local.receipt.footerText}
                         onChange={(e) => handleReceiptChange('footerText', e.target.value)}
-                        // If not root, this might be disabled depending on business logic, but per user request, tenants should control their settings independently.
                         disabled={false} 
                         className={`w-full px-4 py-3 border border-gray-200 rounded-xl outline-none font-medium text-sm h-20 resize-none bg-gray-50`}
                       />
                     </div>
                  </div>
-
-                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4 bg-pink-50/50 rounded-2xl border border-pink-100">
-                    <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-gray-400 uppercase">Paper Width</label>
-                        <select 
-                            value={local.receipt.paperWidth}
-                            onChange={(e) => handleReceiptChange('paperWidth', e.target.value)}
-                            className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl font-bold text-sm"
-                        >
-                            <option value="80mm">80mm (Standard)</option>
-                            <option value="58mm">58mm (Narrow)</option>
-                        </select>
-                    </div>
-                    <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-gray-400 uppercase">Font Size (pt)</label>
-                        <input 
-                            type="number" 
-                            min="8" max="16"
-                            value={local.receipt.fontSize}
-                            onChange={(e) => handleReceiptChange('fontSize', parseInt(e.target.value))}
-                            className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl font-bold text-sm"
-                        />
-                    </div>
-                 </div>
-            </div>
-        </section>
-
-        <section className={`rounded-3xl p-6 shadow-sm border ${isRootAdmin ? 'bg-white border-gray-100' : 'bg-gray-50 border-gray-200'}`}>
-            <h3 className="text-xs font-black text-blue-600 uppercase tracking-widest mb-6 flex items-center gap-2">
-                <LifeBuoy className="w-4 h-4" /> Global System Support
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-400 uppercase">Support Phone</label>
-                    <input 
-                        type="text" 
-                        value={local.owner_contact} 
-                        disabled={!isRootAdmin} // Only Root can change global support contact
-                        onChange={e => setLocal({...local, owner_contact: e.target.value})}
-                        className={`w-full px-4 py-3 border border-gray-200 rounded-xl font-bold ${!isRootAdmin ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-white'}`}
-                    />
-                </div>
-                <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-400 uppercase">Support Email</label>
-                    <input 
-                        type="email" 
-                        value={local.support_email} 
-                        disabled={!isRootAdmin}
-                        onChange={e => setLocal({...local, support_email: e.target.value})}
-                        className={`w-full px-4 py-3 border border-gray-200 rounded-xl font-bold ${!isRootAdmin ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-white'}`}
-                    />
-                </div>
             </div>
         </section>
       </div>
 
-      {/* Preview Modal */}
       {showPreview && (
           <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
               <div className="bg-white w-full max-w-sm rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -307,10 +270,11 @@ const SettingsView: React.FC<SettingsViewProps> = ({ config, setConfig, userRole
                   </div>
                   <div className="flex-1 overflow-y-auto bg-gray-200 p-4 flex justify-center">
                       <div 
-                        className="bg-white shadow-lg p-2" 
+                        className="bg-white shadow-lg p-0" 
                         style={{ width: local.receipt.paperWidth, minHeight: '300px' }}
-                        dangerouslySetInnerHTML={{ __html: previewHtml }}
-                      />
+                      >
+                         <iframe srcDoc={previewHtml} className="w-full h-[600px] border-none" title="Preview" />
+                      </div>
                   </div>
                   <div className="p-4 bg-white border-t border-gray-200 flex justify-end">
                       <button onClick={() => setShowPreview(false)} className="px-6 py-2 bg-blue-600 text-white rounded-xl font-bold text-xs uppercase">Done</button>

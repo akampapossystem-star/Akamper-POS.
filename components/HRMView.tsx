@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Briefcase, UserPlus, Trash2, Phone, Clock, Edit, Power, CheckCircle2, XCircle, Palette, ImageIcon, Upload, User, ShieldCheck, Lock, AlertCircle, ScanFace, Fingerprint, CalendarCheck, X, AlertTriangle, ShieldAlert, Zap } from 'lucide-react';
 import { StaffMember, SystemConfig, UserRole, AttendanceRecord } from '../types';
@@ -26,8 +25,7 @@ const HRMView: React.FC<HRMViewProps> = ({ staff, setStaff, systemConfig, curren
   const [scanningState, setScanningState] = useState<'IDLE' | 'SCANNING' | 'SUCCESS' | 'ERROR'>('IDLE');
   const [scanMessage, setScanMessage] = useState('');
 
-  // MASTER AUTHORITY LOGIC:
-  // Identify if current session is the Master Root or an Impersonating Admin
+  // AUTHORITY LOGIC:
   const isMasterAdmin = currentUser?.id === 'ROOT' || currentUser?.id?.startsWith('MASTER_OVERRIDE');
   const isTenantOwner = currentUser?.role === 'OWNER';
   const hasFullAccess = isMasterAdmin || isTenantOwner;
@@ -35,11 +33,9 @@ const HRMView: React.FC<HRMViewProps> = ({ staff, setStaff, systemConfig, curren
 
   // Helper: Can Edit?
   const canEditMember = (member: StaffMember) => {
-      // Special protection for ROOT account: Only the actual ROOT user can edit/view ROOT
-      if (member.id === 'ROOT' && currentUser?.id !== 'ROOT') return false;
-
-      if (isMasterAdmin) return true; // Master can edit anything
-      if (isTenantOwner) return true; // Owners can edit anything
+      // Root Session can edit anyone
+      if (isMasterAdmin) return true;
+      if (isTenantOwner) return true;
       if (currentUser?.role === 'MANAGER') {
           if (member.role === 'OWNER') return false;
           if (member.role === 'MANAGER' && member.isProtected) return false;
@@ -50,10 +46,8 @@ const HRMView: React.FC<HRMViewProps> = ({ staff, setStaff, systemConfig, curren
 
   // Helper: Can Delete?
   const canDeleteMember = (member: StaffMember) => {
-      if (member.id === 'ROOT') return false; // ROOT cannot be deleted by anyone
-
-      if (isMasterAdmin) return true; // Master bypasses all protections
-      if (isTenantOwner) return true; // Tenant Owner can delete anyone
+      if (isMasterAdmin) return true; 
+      if (isTenantOwner) return true; 
       if (currentUser?.role === 'MANAGER') {
           if (member.isProtected) return false;
           if (member.role === 'OWNER' || member.role === 'MANAGER') return false;
@@ -247,7 +241,6 @@ const HRMView: React.FC<HRMViewProps> = ({ staff, setStaff, systemConfig, curren
         </div>
         
         <div className="flex gap-2">
-            {/* MASTER MODE INDICATOR */}
             {isMasterAdmin && (
                 <div className="hidden lg:flex items-center gap-2 px-4 bg-indigo-600 text-white rounded-xl font-black text-[10px] uppercase tracking-[0.2em] shadow-lg shadow-indigo-200 border border-indigo-400/50 mr-4">
                     <Zap className="w-4 h-4 text-yellow-300 animate-pulse" /> Master Admin Mode
@@ -546,7 +539,7 @@ const HRMView: React.FC<HRMViewProps> = ({ staff, setStaff, systemConfig, curren
                             )}
                             <input 
                                 type="file" 
-                                accept="image/*" 
+                                accept="image/*,.heic,.heif,.avif,.webp,.svg" 
                                 onChange={handlePhotoUpload} 
                                 className="absolute inset-0 opacity-0 cursor-pointer z-10" 
                                 title="Upload from device"
@@ -589,7 +582,6 @@ const HRMView: React.FC<HRMViewProps> = ({ staff, setStaff, systemConfig, curren
                     <CheckCircle2 className="w-6 h-6" /> Save Staff Member
                  </button>
 
-                 {/* ADMINISTRATIVE DELETE OPTION */}
                  {editingId && hasFullAccess && (
                      <div className="mt-8 p-4 bg-red-50 border border-red-100 rounded-xl space-y-3">
                         <h4 className="text-xs font-black text-red-800 uppercase tracking-widest flex items-center gap-2">

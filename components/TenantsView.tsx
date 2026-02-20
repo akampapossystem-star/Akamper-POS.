@@ -1,34 +1,36 @@
-
-import React, { useState, useMemo } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { 
   Globe, Plus, X, Activity, Power, Eye, Trash2, Server, Lock, AlertTriangle, Edit,
-  Search, LogIn, Archive, UserCheck, Calendar, Clock, CreditCard, RefreshCw
+  Search, LogIn, Archive, UserCheck, Calendar, Clock, CreditCard, RefreshCw, ChevronRight,
+  ImageIcon, Upload
 } from 'lucide-react';
-import { BusinessPage, SubscriptionTier, AppView } from '../types';
+import { BusinessPage, SubscriptionTier, AppView, Product, Table, StoreItem } from '../types';
+import { PRODUCTS_DATA, TABLES_DATA, STORE_ITEMS_DATA } from '../mockData';
 
 interface TenantsViewProps {
   businessPages: BusinessPage[];
   setBusinessPages: (pages: BusinessPage[]) => void;
   onPreviewPage: (page: BusinessPage) => void;
   onImpersonate: (page: BusinessPage, targetView?: AppView) => void;
-  onSeedTenantData?: (tenantId: string) => void;
 }
 
-const TenantsView: React.FC<TenantsViewProps> = ({ businessPages, setBusinessPages, onPreviewPage, onImpersonate, onSeedTenantData }) => {
+const TenantsView: React.FC<TenantsViewProps> = ({ businessPages, setBusinessPages, onPreviewPage, onImpersonate }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isRenewModalOpen, setIsRenewModalOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [renewTenant, setRenewTenant] = useState<BusinessPage | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [newBiz, setNewBiz] = useState({ 
     name: '', owner: '', slug: '', contact: '', 
     tier: 'BASIC' as SubscriptionTier,
-    username: '', password: '', adminPin: ''
+    username: '', password: '', adminPin: '',
+    logo: ''
   });
 
   const openCreateModal = () => {
-    setNewBiz({ name: '', owner: '', slug: '', contact: '', tier: 'BASIC', username: '', password: '', adminPin: '' });
+    setNewBiz({ name: '', owner: '', slug: '', contact: '', tier: 'BASIC', username: '', password: '', adminPin: '', logo: '' });
     setEditId(null);
     setIsModalOpen(true);
   };
@@ -42,10 +44,32 @@ const TenantsView: React.FC<TenantsViewProps> = ({ businessPages, setBusinessPag
       tier: tenant.tier,
       username: tenant.credentials?.username || '',
       password: tenant.credentials?.password || '',
-      adminPin: tenant.credentials?.adminPin || ''
+      adminPin: tenant.credentials?.adminPin || '',
+      logo: tenant.settings?.logo || ''
     });
     setEditId(tenant.id);
     setIsModalOpen(true);
+  };
+
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setNewBiz(prev => ({ ...prev, logo: reader.result as string }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const provisionTenantData = (tenantId: string) => {
+      try {
+          localStorage.setItem(`${tenantId}_products`, JSON.stringify(PRODUCTS_DATA));
+          localStorage.setItem(`${tenantId}_tables`, JSON.stringify(TABLES_DATA));
+          localStorage.setItem(`${tenantId}_storeItems`, JSON.stringify(STORE_ITEMS_DATA));
+      } catch (e) {
+          console.error(`[Provisioning] Failed to seed data for ${tenantId}`, e);
+      }
   };
 
   const handleSaveBiz = (e: React.FormEvent) => {
@@ -64,6 +88,10 @@ const TenantsView: React.FC<TenantsViewProps> = ({ businessPages, setBusinessPag
           contact: newBiz.contact,
           slug: newBiz.slug || newBiz.name.toLowerCase().replace(/\s+/g, '-'),
           tier: newBiz.tier,
+          settings: {
+              ...page.settings,
+              logo: newBiz.logo
+          },
           credentials: {
             username: newBiz.username,
             password: newBiz.password,
@@ -72,12 +100,12 @@ const TenantsView: React.FC<TenantsViewProps> = ({ businessPages, setBusinessPag
         } : page
       ));
     } else {
-      // Default expiry 1 month from now for new tenants
       const expiry = new Date();
       expiry.setMonth(expiry.getMonth() + 1);
+      const newId = Math.random().toString(36).substr(2, 9).toUpperCase();
 
       const page: BusinessPage = {
-        id: Math.random().toString(36).substr(2, 9).toUpperCase(),
+        id: newId,
         businessName: newBiz.name,
         ownerName: newBiz.owner,
         contact: newBiz.contact,
@@ -88,62 +116,23 @@ const TenantsView: React.FC<TenantsViewProps> = ({ businessPages, setBusinessPag
         lastPaymentDate: new Date(),
         subscriptionExpiry: expiry,
         isActive: true,
+        settings: {
+            logo: newBiz.logo
+        },
         credentials: {
             username: newBiz.username,
             password: newBiz.password,
             adminPin: newBiz.adminPin || '0000'
         }
       };
+
+      provisionTenantData(newId);
       setBusinessPages([page, ...businessPages]);
-      if (onSeedTenantData) onSeedTenantData(page.id);
     }
     
     setIsModalOpen(false);
-    setNewBiz({ name: '', owner: '', slug: '', contact: '', tier: 'BASIC', username: '', password: '', adminPin: '' });
+    setNewBiz({ name: '', owner: '', slug: '', contact: '', tier: 'BASIC', username: '', password: '', adminPin: '', logo: '' });
     setEditId(null);
-  };
-
-  const handleRenew = (months: number) => {
-      if (!renewTenant) return;
-      
-      const currentExpiry = new Date(renewTenant.subscriptionExpiry);
-      const baseDate = currentExpiry > new Date() ? currentExpiry : new Date();
-      
-      const newExpiry = new Date(baseDate);
-      newExpiry.setMonth(newExpiry.getMonth() + months);
-
-      setBusinessPages(businessPages.map(p => 
-          p.id === renewTenant.id 
-          ? { ...p, subscriptionExpiry: newExpiry, lastPaymentDate: new Date(), status: 'ACTIVE', isActive: true } 
-          : p
-      ));
-      
-      setIsRenewModalOpen(false);
-      setRenewTenant(null);
-      alert(`${renewTenant.businessName} activated until ${newExpiry.toLocaleDateString()}`);
-  };
-
-  const toggleTenantStatus = (id: string) => {
-    setBusinessPages(businessPages.map(p => {
-      if (p.id === id) {
-        const newStatus = p.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE';
-        return { ...p, status: newStatus, isActive: newStatus === 'ACTIVE' };
-      }
-      return p;
-    }));
-  };
-
-  const updateTenantTier = (id: string, newTier: SubscriptionTier) => {
-    if(confirm(`Change Subscription Tier to ${newTier}?`)) {
-      setBusinessPages(businessPages.map(p => p.id === id ? { ...p, tier: newTier } : p));
-    }
-  };
-
-  const archivePage = (id: string, name: string) => {
-    const confirmation = prompt(`⚠️ ARCHIVE TENANT ⚠️\n\nTo archive "${name}", please type "ARCHIVE" below.`);
-    if (confirmation === "ARCHIVE") {
-      setBusinessPages(businessPages.map(p => p.id === id ? { ...p, status: 'ARCHIVED', isActive: false } : p));
-    }
   };
 
   const filteredTenants = businessPages.filter(tenant => {
@@ -156,122 +145,103 @@ const TenantsView: React.FC<TenantsViewProps> = ({ businessPages, setBusinessPag
   });
 
   return (
-    <div className="p-8 h-full overflow-y-auto bg-[#111827] text-white">
-      <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="p-8 h-full overflow-y-auto bg-[#020617] text-white">
+      <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
          
          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-6">
-            <div className="flex items-center gap-3">
-              <Server className="w-8 h-8 text-indigo-400" />
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-blue-500/10 rounded-2xl border border-blue-500/20">
+                <Server className="w-8 h-8 text-blue-400" />
+              </div>
               <div>
-                <h2 className="text-3xl font-black uppercase tracking-tighter">Tenant Management</h2>
-                <p className="text-gray-400 font-medium text-xs uppercase tracking-widest mt-1">Activation & Subscription Control</p>
+                <h2 className="text-3xl font-black uppercase tracking-tighter">Business Sandbox</h2>
+                <p className="text-slate-400 font-medium text-xs uppercase tracking-[0.2em] mt-1">Tenant Registry Management</p>
               </div>
             </div>
 
             <div className="flex flex-col sm:flex-row gap-4 w-full xl:w-auto">
                 <div className="relative flex-1 sm:min-w-[300px]">
-                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                     <input 
                         type="text" 
-                        placeholder="Search tenants..." 
+                        placeholder="Search Registry..." 
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full pl-11 pr-4 py-3 bg-gray-900 border border-gray-700 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none text-white font-bold text-sm placeholder:text-gray-600 transition-all shadow-inner"
+                        className="w-full pl-12 pr-4 py-4 bg-white/5 border border-white/10 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-white font-bold text-sm placeholder:text-slate-600 transition-all shadow-inner"
                     />
                 </div>
                 <button 
                   onClick={openCreateModal}
-                  className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 rounded-2xl flex items-center justify-center gap-2 font-black text-sm uppercase transition-all shadow-lg shadow-indigo-900/40 shrink-0"
+                  className="px-8 py-4 bg-blue-600 hover:bg-blue-700 rounded-2xl flex items-center justify-center gap-3 font-black text-sm uppercase tracking-widest transition-all shadow-2xl shadow-blue-900/40 shrink-0 active:scale-95"
                 >
-                  <Plus className="w-5 h-5" /> Provision Tenant
+                  <Plus className="w-5 h-5" /> Provision New
                 </button>
             </div>
          </div>
 
-         <div className="bg-gray-900 border border-gray-800 rounded-[2.5rem] overflow-hidden">
+         <div className="bg-white/5 border border-white/10 rounded-[3rem] overflow-hidden backdrop-blur-xl">
             <div className="overflow-x-auto">
                <table className="w-full text-left">
                   <thead>
-                     <tr className="bg-gray-950 text-gray-500 text-[10px] font-black uppercase tracking-widest border-b border-gray-800">
-                        <th className="px-6 py-4">Business Info</th>
-                        <th className="px-6 py-4">Credentials & PIN</th>
-                        <th className="px-6 py-4">Expiry Date</th>
-                        <th className="px-6 py-4">Status</th>
-                        <th className="px-6 py-4">Actions</th>
+                     <tr className="bg-white/5 text-slate-500 text-[10px] font-black uppercase tracking-[0.2em] border-b border-white/10">
+                        <th className="px-8 py-6">Business Identity</th>
+                        <th className="px-8 py-6">Access Matrix</th>
+                        <th className="px-8 py-6">Status Log</th>
+                        <th className="px-8 py-6 text-right">Actions</th>
                      </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-800">
+                  <tbody className="divide-y divide-white/5">
                      {filteredTenants.length === 0 ? (
-                        <tr><td colSpan={5} className="p-8 text-center text-gray-500">{searchTerm ? `No tenants found matching "${searchTerm}"` : 'No active tenants distributed.'}</td></tr>
+                        <tr><td colSpan={4} className="p-20 text-center text-slate-500 font-black uppercase tracking-widest opacity-40">No distributed instances found</td></tr>
                      ) : (
                         filteredTenants.map(tenant => {
                            const isArchived = tenant.status === 'ARCHIVED';
                            const isExpired = new Date() > new Date(tenant.subscriptionExpiry);
-                           const expiryColor = isExpired ? 'text-red-500' : 'text-emerald-400';
 
                            return (
-                           <tr key={tenant.id} className={`transition-colors ${isArchived ? 'opacity-50 grayscale bg-gray-900/50' : 'hover:bg-gray-800/50'}`}>
-                              <td className="px-6 py-4">
-                                 <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 bg-indigo-900 rounded-xl flex items-center justify-center font-bold text-indigo-300">
-                                       {tenant.businessName.charAt(0)}
+                           <tr key={tenant.id} className={`transition-all ${isArchived ? 'opacity-50 grayscale bg-white/5' : 'hover:bg-white/[0.07]'}`}>
+                              <td className="px-8 py-6">
+                                 <div className="flex items-center gap-4">
+                                    <div className="w-14 h-14 bg-slate-900 rounded-full flex items-center justify-center font-bold text-blue-300 shadow-xl border border-white/10 overflow-hidden ring-2 ring-blue-500/10 shrink-0">
+                                       {tenant.settings?.logo ? (
+                                           <img src={tenant.settings.logo} className="w-full h-full object-cover" alt="Logo" />
+                                       ) : (
+                                           <span className="text-xl text-blue-600">{tenant.businessName.charAt(0)}</span>
+                                       )}
                                     </div>
                                     <div>
-                                       <div className="font-bold text-white text-sm">{tenant.businessName}</div>
-                                       <div className="text-[10px] font-mono text-gray-500">{tenant.tier} Plan</div>
+                                       <div className="font-black text-white text-base uppercase tracking-tight">{tenant.businessName}</div>
+                                       <div className="text-[10px] font-black text-blue-400 uppercase tracking-widest mt-1">{tenant.tier} Cluster</div>
                                     </div>
                                  </div>
                               </td>
-                              <td className="px-6 py-4">
-                                 <div className="flex flex-col gap-1">
-                                    <div className="flex items-center gap-2 text-[11px] text-gray-400">
-                                        <span className="font-mono text-indigo-300 bg-indigo-900/30 px-1 rounded">{tenant.credentials?.username || 'N/A'}</span>
-                                        <span className="font-mono text-gray-300 bg-gray-800 px-1 rounded">{tenant.credentials?.password || '***'}</span>
+                              <td className="px-8 py-6">
+                                 <div className="flex flex-col gap-2">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[11px] font-mono text-slate-400 bg-white/5 px-2 py-0.5 rounded border border-white/5">ID: {tenant.credentials?.username || 'N/A'}</span>
                                     </div>
-                                    <div className="text-[10px] font-mono text-emerald-500/70">PIN: {tenant.credentials?.adminPin || '0000'}</div>
+                                    <div className="text-[10px] font-black text-emerald-500/60 uppercase tracking-widest">MASTER PIN: {tenant.credentials?.adminPin || '0000'}</div>
                                  </div>
                               </td>
-                              <td className="px-6 py-4">
-                                 <div className={`flex items-center gap-2 font-mono text-xs font-bold ${expiryColor}`}>
-                                    <Calendar className="w-3 h-3" />
-                                    {new Date(tenant.subscriptionExpiry).toLocaleDateString()}
-                                 </div>
-                                 {isExpired && <span className="text-[9px] font-black uppercase text-red-400 block mt-0.5">Access Suspended</span>}
-                              </td>
-                              <td className="px-6 py-4">
-                                 <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
-                                    isExpired ? 'bg-red-900/30 text-red-400 border border-red-900' :
-                                    tenant.status === 'ACTIVE' ? 'bg-green-900/30 text-green-400 border border-green-900' :
-                                    tenant.status === 'ARCHIVED' ? 'bg-gray-800 text-gray-500 border border-gray-700' :
-                                    'bg-orange-900/30 text-orange-400 border border-orange-900'
+                              <td className="px-8 py-6">
+                                 <span className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest ${
+                                    isExpired ? 'bg-red-500/10 text-red-500 border border-red-500/20' :
+                                    tenant.status === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                                    'bg-orange-500/10 text-orange-400 border border-orange-500/20'
                                  }`}>
-                                    <Activity className="w-3 h-3" />
+                                    <Activity className="w-3.5 h-3.5" />
                                     {isExpired ? 'EXPIRED' : tenant.status}
                                  </span>
                               </td>
-                              <td className="px-6 py-4">
-                                 <div className="flex items-center gap-2">
-                                    <button 
-                                       onClick={() => { setRenewTenant(tenant); setIsRenewModalOpen(true); }}
-                                       className="px-3 py-2 bg-emerald-600 text-white hover:bg-emerald-700 rounded-lg transition-colors font-bold text-xs uppercase flex items-center gap-2"
-                                       title="Renew Subscription"
-                                    >
-                                       <RefreshCw className="w-3.5 h-3.5" /> Renew
-                                    </button>
-                                    
-                                    <div className="w-px h-6 bg-gray-700 mx-1"></div>
-                                    
+                              <td className="px-8 py-6">
+                                 <div className="flex items-center justify-end gap-3">
                                     <button 
                                        onClick={() => onImpersonate(tenant, AppView.DASHBOARD)}
-                                       disabled={isArchived}
-                                       className="px-3 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded-lg transition-colors font-bold text-xs uppercase flex items-center gap-2 disabled:opacity-50"
-                                       title="Access Dashboard"
+                                       className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-all font-black text-[10px] uppercase tracking-widest flex items-center gap-2 shadow-xl shadow-blue-900/20 active:scale-95"
                                     >
-                                       <LogIn className="w-3.5 h-3.5" /> Login
+                                       <LogIn className="w-4 h-4" /> Access
                                     </button>
-                                    
-                                    <button onClick={() => openEditModal(tenant)} className="p-2 text-blue-400 hover:text-white"><Edit className="w-4 h-4" /></button>
-                                    <button onClick={() => archivePage(tenant.id, tenant.businessName)} className="p-2 text-gray-500 hover:text-orange-400"><Archive className="w-4 h-4" /></button>
+                                    <button onClick={() => openEditModal(tenant)} className="p-2.5 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white rounded-xl border border-white/10 transition-all"><Edit className="w-4 h-4" /></button>
                                  </div>
                               </td>
                            </tr>
@@ -283,96 +253,70 @@ const TenantsView: React.FC<TenantsViewProps> = ({ businessPages, setBusinessPag
          </div>
       </div>
 
-      {/* RENEW MODAL */}
-      {isRenewModalOpen && renewTenant && (
-          <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[110] flex items-center justify-center p-4">
-              <div className="bg-gray-900 border border-emerald-500/30 rounded-[2.5rem] shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in-95">
-                  <div className="p-8 bg-emerald-600 text-white text-center">
-                      <RefreshCw className="w-12 h-12 mx-auto mb-4 animate-spin-slow" />
-                      <h3 className="text-2xl font-black uppercase tracking-tight">Activate System Access</h3>
-                      <p className="text-emerald-100 text-sm mt-1">{renewTenant.businessName}</p>
-                  </div>
-                  <div className="p-8 space-y-6">
-                      <div className="bg-gray-800 p-4 rounded-2xl border border-gray-700 text-center">
-                          <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Current Expiry</p>
-                          <p className="font-mono text-xl font-bold text-emerald-400">{new Date(renewTenant.subscriptionExpiry).toLocaleDateString()}</p>
-                      </div>
-
-                      <div className="space-y-3">
-                          <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest block text-center">Select Activation Period</label>
-                          <div className="grid grid-cols-1 gap-3">
-                              <button onClick={() => handleRenew(1)} className="p-4 bg-gray-800 border border-gray-700 rounded-2xl flex justify-between items-center hover:border-emerald-500 hover:bg-emerald-900/10 transition-all group">
-                                  <div className="text-left">
-                                      <p className="font-bold text-white uppercase text-sm">One Month</p>
-                                      <p className="text-[10px] text-gray-500">Standard cycle</p>
-                                  </div>
-                                  <ChevronRight className="w-5 h-5 text-gray-600 group-hover:text-emerald-500" />
-                              </button>
-                              <button onClick={() => handleRenew(6)} className="p-4 bg-gray-800 border border-gray-700 rounded-2xl flex justify-between items-center hover:border-emerald-500 hover:bg-emerald-900/10 transition-all group">
-                                  <div className="text-left">
-                                      <p className="font-bold text-white uppercase text-sm">Six Months</p>
-                                      <p className="text-[10px] text-emerald-500 font-black uppercase">Popular Choice</p>
-                                  </div>
-                                  <ChevronRight className="w-5 h-5 text-gray-600 group-hover:text-emerald-500" />
-                              </button>
-                              <button onClick={() => handleRenew(12)} className="p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-2xl flex justify-between items-center hover:border-indigo-500 hover:bg-indigo-900/30 transition-all group">
-                                  <div className="text-left">
-                                      <p className="font-black text-indigo-400 uppercase text-sm">One Year</p>
-                                      <p className="text-[10px] text-indigo-300 font-bold uppercase tracking-widest">Enterprise Priority</p>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                      <span className="text-[9px] bg-indigo-500 text-white font-black px-2 py-0.5 rounded uppercase">-20% Off</span>
-                                      <ChevronRight className="w-5 h-5 text-indigo-500" />
-                                  </div>
-                              </button>
-                          </div>
-                      </div>
-
-                      <button onClick={() => setIsRenewModalOpen(false)} className="w-full py-4 text-gray-500 font-bold uppercase text-xs hover:text-white transition-colors">Cancel</button>
-                  </div>
-              </div>
-          </div>
-      )}
-
-      {/* PROVISION MODAL */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-          <div className="bg-gray-900 border border-gray-800 rounded-[2.5rem] shadow-2xl max-w-lg w-full overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="p-8 border-b border-gray-800 flex justify-between items-center bg-indigo-600/10">
-              <div><h3 className="text-2xl font-black tracking-tighter uppercase text-white flex items-center gap-3"><Globe className="w-6 h-6 text-indigo-400" /> {editId ? 'Edit Tenant' : 'New Tenant'}</h3></div>
-              <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-white/10 rounded-full text-gray-400"><X /></button>
-            </div>
-            <form onSubmit={handleSaveBiz} className="p-8 space-y-4">
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Business Name</label>
-                <input required value={newBiz.name} onChange={e => setNewBiz({...newBiz, name: e.target.value})} className="w-full px-5 py-3 bg-gray-800 border border-gray-700 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none text-white font-bold" />
+          <div className="bg-[#0f172a] border border-white/10 rounded-[3rem] shadow-2xl max-w-lg w-full overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-10 border-b border-white/5 flex justify-between items-center bg-blue-600/5">
+              <div>
+                  <h3 className="text-2xl font-black tracking-tighter uppercase text-white flex items-center gap-4">
+                      <Globe className="w-7 h-7 text-blue-500" /> {editId ? 'Modify Sandbox' : 'Provision Instance'}
+                  </h3>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                 <div className="space-y-1">
-                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Owner</label>
-                    <input required value={newBiz.owner} onChange={e => setNewBiz({...newBiz, owner: e.target.value})} className="w-full px-5 py-3 bg-gray-800 border border-gray-700 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none text-white font-bold" />
+              <button onClick={() => setIsModalOpen(false)} className="p-3 hover:bg-white/10 rounded-full text-slate-500 transition-colors"><X className="w-6 h-6"/></button>
+            </div>
+            <form onSubmit={handleSaveBiz} className="p-10 space-y-6 max-h-[70vh] overflow-y-auto custom-scrollbar">
+              
+              <div className="flex flex-col items-center gap-6 p-8 bg-white/5 rounded-3xl border border-white/5">
+                  <div className="w-24 h-24 bg-slate-900 rounded-full flex items-center justify-center overflow-hidden shrink-0 border-4 border-blue-500/20 shadow-2xl relative group">
+                      {newBiz.logo ? (
+                          <img src={newBiz.logo} className="w-full h-full object-cover" alt="Preview" />
+                      ) : (
+                          <ImageIcon className="w-10 h-10 text-slate-700" />
+                      )}
+                      <input type="file" ref={fileInputRef} className="absolute inset-0 opacity-0 cursor-pointer z-20" accept="image/*" onChange={handleLogoUpload} />
+                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none z-10">
+                          <Upload className="w-6 h-6 text-white" />
+                      </div>
+                  </div>
+                  <div className="text-center">
+                      <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1">Business Identity Graphic</p>
+                      <p className="text-[9px] text-slate-500">Logo will be force-rounded to eliminate white margins.</p>
+                  </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Official Name</label>
+                <input required value={newBiz.name} onChange={e => setNewBiz({...newBiz, name: e.target.value})} className="w-full px-6 py-4 bg-white/5 border border-white/10 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-white font-bold text-lg" placeholder="e.g. KAMPALA GRILL" />
+              </div>
+
+              <div className="grid grid-cols-2 gap-6">
+                 <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Owner</label>
+                    <input required value={newBiz.owner} onChange={e => setNewBiz({...newBiz, owner: e.target.value})} className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-white font-bold" />
                  </div>
-                 <div className="space-y-1">
-                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Tier</label>
-                    <select value={newBiz.tier} onChange={e => setNewBiz({...newBiz, tier: e.target.value as SubscriptionTier})} className="w-full px-5 py-3 bg-gray-800 border border-gray-700 rounded-2xl text-white font-bold appearance-none outline-none">
-                        <option value="BASIC">Basic</option>
-                        <option value="PRO">Pro</option>
-                        <option value="ENTERPRISE">Enterprise</option>
+                 <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Subscription Tier</label>
+                    <select value={newBiz.tier} onChange={e => setNewBiz({...newBiz, tier: e.target.value as SubscriptionTier})} className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-white font-black appearance-none outline-none cursor-pointer">
+                        <option value="BASIC">BASIC</option>
+                        <option value="PRO">PRO</option>
+                        <option value="ENTERPRISE">ENTERPRISE</option>
                     </select>
                  </div>
               </div>
               
-              <div className="p-4 bg-gray-800/50 rounded-2xl border border-gray-700 space-y-4">
-                 <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2"><Lock className="w-3 h-3" /> Client Credentials</h4>
+              <div className="p-6 bg-blue-500/5 rounded-[2rem] border border-blue-500/10 space-y-6">
+                 <h4 className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] flex items-center gap-3">
+                     <Lock className="w-4 h-4" /> Hardened Access Credentials
+                 </h4>
                  <div className="grid grid-cols-2 gap-4">
-                    <input required value={newBiz.username} onChange={e => setNewBiz({...newBiz, username: e.target.value})} className="w-full px-5 py-3 bg-gray-900 border border-gray-700 rounded-xl text-white font-mono text-sm" placeholder="Username" />
-                    <input required value={newBiz.password} onChange={e => setNewBiz({...newBiz, password: e.target.value})} className="w-full px-5 py-3 bg-gray-900 border border-gray-700 rounded-xl text-white font-mono text-sm" placeholder="Password" />
-                    <input required maxLength={4} value={newBiz.adminPin} onChange={e => setNewBiz({...newBiz, adminPin: e.target.value})} className="w-full px-5 py-3 bg-gray-900 border border-gray-700 rounded-xl text-white font-mono text-sm tracking-widest text-center col-span-2" placeholder="Master PIN (4 Digits)" />
+                    <input required value={newBiz.username} onChange={e => setNewBiz({...newBiz, username: e.target.value})} className="w-full px-5 py-4 bg-slate-900 border border-white/5 rounded-2xl text-white font-mono text-sm placeholder:text-slate-700" placeholder="LOGIN ID" />
+                    <input required value={newBiz.password} onChange={e => setNewBiz({...newBiz, password: e.target.value})} className="w-full px-5 py-4 bg-slate-900 border border-white/5 rounded-2xl text-white font-mono text-sm placeholder:text-slate-700" placeholder="PASS KEY" />
+                    <input required maxLength={4} value={newBiz.adminPin} onChange={e => setNewBiz({...newBiz, adminPin: e.target.value})} className="w-full px-5 py-4 bg-slate-900 border border-white/5 rounded-2xl text-white font-mono text-base tracking-[1em] text-center col-span-2" placeholder="ADMIN PIN" />
                  </div>
               </div>
 
-              <button type="submit" className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black text-sm uppercase flex items-center justify-center gap-2 shadow-lg shadow-indigo-900/50 transition-all">
-                {editId ? 'Update Tenant' : 'Activate Tenant'}
+              <button type="submit" className="w-full py-5 bg-blue-600 hover:bg-blue-700 text-white rounded-3xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-3 shadow-2xl shadow-blue-900/40 transition-all active:scale-95">
+                {editId ? 'Commit Deployment' : 'Deploy Environment'}
               </button>
             </form>
           </div>
@@ -381,10 +325,5 @@ const TenantsView: React.FC<TenantsViewProps> = ({ businessPages, setBusinessPag
     </div>
   );
 };
-
-// Internal Helper for Icons
-const ChevronRight = ({ className }: { className: string }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m9 18 6-6-6-6"/></svg>
-);
 
 export default TenantsView;
